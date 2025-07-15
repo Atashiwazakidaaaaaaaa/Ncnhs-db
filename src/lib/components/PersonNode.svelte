@@ -1,37 +1,79 @@
 <!-- src/lib/components/PersonNode.svelte -->
 
-<!-- Add lang="ts" to the script tag -->
 <script lang="ts">
-  // Add explicit 'string' types to the props
   export let name: string = "Name N. Name";
   export let role: string = "Teacher";
+  export let departmentColor: string = "#047857";
+  export let scale: number = 1;
+  
+  // Enhanced role-based styling
+  $: isLeadership = role.includes("Principal") || role.includes("Master Teacher");
+  $: nodeGlow = isLeadership ? "ring-2 ring-offset-2 ring-yellow-300" : "";
 </script>
 
-<!-- The HTML template remains the same -->
-<div class="flex w-32 flex-col items-center text-center">
-  <!-- Circular Icon Container -->
-  <div
-    class="flex h-28 w-28 items-center justify-center rounded-full border-2 border-yellow-400 bg-green-100/80 shadow-md"
-  >
-    <!-- User Icon SVG -->
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      class="h-14 w-14 text-green-600"
-      viewBox="0 0 24 24"
-      stroke-width="1.5"
-      stroke="currentColor"
-      fill="none"
-      stroke-linecap="round"
-      stroke-linejoin="round"
+<div 
+  class="faculty-node group flex flex-col items-center transition-all duration-300 hover:scale-105"
+  style="transform: scale({scale});"
+>
+  <div class="relative mb-2">
+    <!-- Profile Picture Circle with department color accent and leadership glow -->
+    <div 
+      class="w-[90px] h-[90px] rounded-full flex items-center justify-center shadow-lg {isLeadership ? 'shadow-yellow-200/50' : ''}"
+      style="background: linear-gradient(135deg, {departmentColor}, {departmentColor}CC);"
     >
-      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-      <path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0" />
-      <path d="M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" />
-    </svg>
+      <div class="w-[84px] h-[84px] rounded-full bg-white flex items-center justify-center overflow-hidden border-2 border-white {nodeGlow}">
+        <!-- Default avatar icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" />
+        </svg>
+      </div>
+    </div>
+    
+    <!-- Badge Accent with different icons based on role -->
+    <div 
+      class="absolute -right-1 -bottom-1 w-6 h-6 rounded-full border-2 border-white shadow-md flex items-center justify-center"
+      style="background-color: {departmentColor};"
+    >
+      {#if role.includes("Principal")}
+        <!-- Crown icon for Principal -->
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M5 4a1 1 0 00-2 0v7.268a2 2 0 000 3.464V16a1 1 0 102 0v-1.268a2 2 0 000-3.464V4zM11 4a1 1 0 10-2 0v1.268a2 2 0 000 3.464V16a1 1 0 102 0V8.732a2 2 0 000-3.464V4zM16 3a1 1 0 011 1v7.268a2 2 0 010 3.464V16a1 1 0 11-2 0v-1.268a2 2 0 010-3.464V4a1 1 0 011-1z" />
+        </svg>
+      {:else if role.includes("Master Teacher")}
+        <!-- Star icon for Master Teachers -->
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+        </svg>
+      {:else}
+        <!-- Education icon for regular teachers -->
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0zM6 18a1 1 0 001-1v-2.065a8.935 8.935 0 00-2-.712V17a1 1 0 001 1z" />
+        </svg>
+      {/if}
+    </div>
   </div>
-  <!-- Text Below Icon -->
-  <div class="mt-2">
-    <p class="font-semibold text-sm text-green-900">{name}</p>
-    <p class="text-xs text-green-700">{role}</p>
+  
+  <!-- Text Content with special styling for leadership roles -->
+  <div class="text-center max-w-[120px]">
+    <h3 class="font-bold text-sm {isLeadership ? 'text-green-800' : 'text-green-900'} leading-tight">{name}</h3>
+    <p class="text-xs {isLeadership ? 'text-green-600 font-medium' : 'text-green-700'} mt-1">{role}</p>
+  </div>
+  
+  <!-- Tooltip on hover - visible on larger screens -->
+  <div class="absolute opacity-0 group-hover:opacity-100 pointer-events-none bottom-full mb-2 bg-white/90 backdrop-blur-sm rounded-lg p-3 shadow-lg border border-green-200 w-48 transition-opacity duration-200 hidden md:block">
+    <h4 class="font-bold text-green-900">{name}</h4>
+    <p class="text-sm text-green-700">{role}</p>
+    <div class="mt-2 text-xs flex items-center">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1 text-green-600" viewBox="0 0 20 20" fill="currentColor">
+        <path fill-rule="evenodd" d="M14.243 5.757a6 6 0 10-.986 9.284 1 1 0 111.087 1.678A8 8 0 1118 10a3 3 0 01-4.8 2.401A4 4 0 1114 10a1 1 0 102 0c0-1.537-.586-3.07-1.757-4.243zM12 10a2 2 0 10-4 0 2 2 0 004 0z" clip-rule="evenodd" />
+      </svg>
+      <span>faculty@ncnhs.edu.ph</span>
+    </div>
+    <div class="mt-1 text-xs flex items-center">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1 text-green-600" viewBox="0 0 20 20" fill="currentColor">
+        <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+      </svg>
+      <span>Faculty Office</span>
+    </div>
   </div>
 </div>
