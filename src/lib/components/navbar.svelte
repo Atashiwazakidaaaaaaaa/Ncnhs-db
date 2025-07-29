@@ -22,11 +22,6 @@
   function handleAdminClick() {
     dispatch('adminClick');
   }
-  
-  function handleNavClick(item: string) {
-    dispatch('navClick', item);
-    isMobileMenuOpen = false;
-  }
 </script>
 
 <header class="sticky top-0 w-full bg-green-900/80 p-3 shadow-lg backdrop-blur-md border-b border-green-700/30 z-20">
@@ -65,16 +60,16 @@
     <!-- Right Side: Navigation (Desktop) -->
     <nav class="hidden md:flex items-center gap-2 md:gap-3">
       {#each navItems as item}
-        <button 
+        <a 
+          href={item.href}
           class={`px-3 py-2 rounded-lg text-sm font-semibold transition-all duration-300 hover:scale-105 ${
             currentPage === item.name 
               ? 'text-green-900 bg-gradient-to-r from-yellow-300 to-yellow-400 shadow-md hover:shadow-lg' 
               : 'text-white hover:bg-green-700/50'
           }`}
-          on:click={() => handleNavClick(item.name)}
         >
           {item.name}
-        </button>
+        </a>
       {/each}
     </nav>
   </div>
@@ -84,16 +79,17 @@
     <div class="md:hidden bg-green-800/90 mt-2 p-2 rounded-lg" transition:slide={{ duration: 200 }}>
       <nav class="flex flex-col space-y-2">
         {#each navItems as item}
-          <button 
+          <a 
+            href={item.href}
             class={`px-3 py-2 rounded-lg text-sm font-semibold transition-colors text-left ${
               currentPage === item.name 
                 ? 'text-green-900 bg-gradient-to-r from-yellow-300 to-yellow-400' 
                 : 'text-white hover:bg-green-700/50'
             }`}
-            on:click={() => handleNavClick(item.name)}
+            on:click={() => isMobileMenuOpen = false}
           >
             {item.name}
-          </button>
+          </a>
         {/each}
       </nav>
     </div>

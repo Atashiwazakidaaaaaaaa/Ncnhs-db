@@ -1,19 +1,41 @@
 <!-- src/lib/components/PersonNode.svelte -->
 
 <script lang="ts">
+  import { createEventDispatcher } from 'svelte';
+  
   export let name: string = "Name N. Name";
   export let role: string = "Teacher";
   export let departmentColor: string = "#047857";
   export let scale: number = 1;
+  export let email: string = "";
+  export let number: string = "";
+  
+  const dispatch = createEventDispatcher();
   
   // Enhanced role-based styling
   $: isLeadership = role.includes("Principal") || role.includes("Master Teacher");
   $: nodeGlow = isLeadership ? "ring-2 ring-offset-2 ring-yellow-300" : "";
+  
+  function handleClick() {
+    // Dispatch click event for mobile devices
+    dispatch('profileClick', {
+      name,
+      role,
+      email,
+      number,
+      departmentColor
+    });
+  }
 </script>
 
 <div 
-  class="faculty-node group flex flex-col items-center transition-all duration-300 hover:scale-105"
+  class="faculty-node group flex flex-col items-center transition-all duration-300 hover:scale-105 cursor-pointer md:cursor-default"
   style="transform: scale({scale});"
+  on:click={handleClick}
+  on:keydown={(e) => e.key === 'Enter' && handleClick()}
+  tabindex="0"
+  role="button"
+  aria-label="View {name}'s profile"
 >
   <div class="relative mb-2">
     <!-- Profile Picture Circle with department color accent and leadership glow -->
@@ -63,17 +85,26 @@
   <div class="absolute opacity-0 group-hover:opacity-100 pointer-events-none bottom-full mb-2 bg-white/90 backdrop-blur-sm rounded-lg p-3 shadow-lg border border-green-200 w-48 transition-opacity duration-200 hidden md:block">
     <h4 class="font-bold text-green-900">{name}</h4>
     <p class="text-sm text-green-700">{role}</p>
-    <div class="mt-2 text-xs flex items-center">
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1 text-green-600" viewBox="0 0 20 20" fill="currentColor">
-        <path fill-rule="evenodd" d="M14.243 5.757a6 6 0 10-.986 9.284 1 1 0 111.087 1.678A8 8 0 1118 10a3 3 0 01-4.8 2.401A4 4 0 1114 10a1 1 0 102 0c0-1.537-.586-3.07-1.757-4.243zM12 10a2 2 0 10-4 0 2 2 0 004 0z" clip-rule="evenodd" />
-      </svg>
-      <span>faculty@ncnhs.edu.ph</span>
-    </div>
-    <div class="mt-1 text-xs flex items-center">
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1 text-green-600" viewBox="0 0 20 20" fill="currentColor">
-        <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-      </svg>
-      <span>Faculty Office</span>
-    </div>
+    {#if email}
+      <div class="mt-2 text-xs flex items-center">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1 text-green-600" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M14.243 5.757a6 6 0 10-.986 9.284 1 1 0 111.087 1.678A8 8 0 1118 10a3 3 0 01-4.8 2.401A4 4 0 1114 10a1 1 0 102 0c0-1.537-.586-3.07-1.757-4.243zM12 10a2 2 0 10-4 0 2 2 0 004 0z" clip-rule="evenodd" />
+        </svg>
+        <span class="break-all">{email}</span>
+      </div>
+    {/if}
+    {#if number}
+      <div class="mt-1 text-xs flex items-center">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1 text-green-600" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+        </svg>
+        <span>{number}</span>
+      </div>
+    {/if}
+    {#if !email && !number}
+      <div class="mt-2 text-xs text-gray-500 italic">
+        No contact information available
+      </div>
+    {/if}
   </div>
 </div>
