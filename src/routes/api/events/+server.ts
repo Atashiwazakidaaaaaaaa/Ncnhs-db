@@ -6,7 +6,8 @@ import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async () => {
 	try {
-		const allEvents = await db.select().from(events);
+		const database = await db();
+		const allEvents = await database.select().from(events);
 		
 		const transformedEvents = allEvents.map(event => ({
 			id: event.id,
@@ -36,7 +37,8 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 
 		// Insert new event
-		const result = await db.insert(events).values({
+		const database = await db();
+		const result = await database.insert(events).values({
 			title,
 			description: description || '',
 			event_date: new Date(event_date),
@@ -63,7 +65,8 @@ export const PUT: RequestHandler = async ({ request }) => {
 		}
 
 		// Update event
-		await db.update(events).set({
+		const database = await db();
+		await database.update(events).set({
 			title,
 			description,
 			event_date: new Date(event_date),
@@ -89,7 +92,8 @@ export const DELETE: RequestHandler = async ({ request }) => {
 			return json({ error: 'Event ID is required' }, { status: 400 });
 		}
 
-		await db.delete(events).where(eq(events.id, id));
+		const database = await db();
+		await database.delete(events).where(eq(events.id, id));
 
 		return json({ success: true });
 	} catch (error) {

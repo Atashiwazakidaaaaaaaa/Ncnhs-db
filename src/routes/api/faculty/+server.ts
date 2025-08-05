@@ -7,7 +7,8 @@ import type { RequestHandler } from './$types';
 // GET all faculty
 export const GET: RequestHandler = async () => {
   try {
-    const allFaculty = await db.select().from(faculty);
+    const database = await db();
+    const allFaculty = await database.select().from(faculty);
     return json(allFaculty);
   } catch (error) {
     console.error('Error fetching faculty:', error);
@@ -24,7 +25,8 @@ export const POST: RequestHandler = async ({ request }) => {
       return json({ error: 'Name, role, and department are required' }, { status: 400 });
     }
     
-    await db.insert(faculty).values({
+    const database = await db();
+    await database.insert(faculty).values({
       name,
       role,
       department,
@@ -33,7 +35,7 @@ export const POST: RequestHandler = async ({ request }) => {
     });
     
     // Get the most recently inserted faculty
-    const allFaculty = await db.select().from(faculty);
+    const allFaculty = await database.select().from(faculty);
     const newFaculty = allFaculty[allFaculty.length - 1];
     
     return json({ faculty: newFaculty }, { status: 201 });

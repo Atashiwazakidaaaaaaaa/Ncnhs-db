@@ -19,7 +19,8 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 		}
 
 		// Update event
-		await db.update(events).set({
+		const database = await db();
+		await database.update(events).set({
 			title,
 			description: description || '',
 			event_date: new Date(event_date),
@@ -45,7 +46,8 @@ export const DELETE: RequestHandler = async ({ params }) => {
 			return json({ error: 'Valid event ID is required' }, { status: 400 });
 		}
 
-		await db.delete(events).where(eq(events.id, id));
+		const database = await db();
+		await database.delete(events).where(eq(events.id, id));
 
 		return json({ success: true, message: 'Event deleted successfully' });
 	} catch (error) {

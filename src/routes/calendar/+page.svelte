@@ -1,6 +1,4 @@
 <script lang="ts">
-  import Navbar from "$lib/components/navbar.svelte";
-  import AdminLoginModal from "$lib/components/AdminLoginModal.svelte";
   import { fly, fade } from 'svelte/transition';
   import { onMount, onDestroy } from 'svelte';
   import { browser } from '$app/environment';
@@ -20,6 +18,37 @@
   // Get events from server data
   let events = data.events || [];
   
+  // Reactive statement to get upcoming events sorted chronologically
+  $: upcomingEvents = (() => {
+    const now = new Date();
+    const today = now.toISOString().split('T')[0]; // Get YYYY-MM-DD format
+    
+    return events
+      .filter(event => event.date >= today) // Only future/today events
+      .sort((a, b) => {
+        // Sort by date first
+        const dateComparison = a.date.localeCompare(b.date);
+        if (dateComparison !== 0) return dateComparison;
+        
+        // If dates are the same, sort by start time
+        // Extract start time from the time string (format: "HH:MM AM/PM - HH:MM AM/PM")
+        const getStartTime = (timeStr: string) => {
+          const match = timeStr.match(/^(\d{1,2}:\d{2} [AP]M)/);
+          if (!match) return 0; // Return 0 instead of the string for invalid formats
+          
+          const [time, modifier] = match[1].split(' ');
+          let [hours, minutes] = time.split(':').map(Number);
+          
+          if (modifier === 'PM' && hours !== 12) hours += 12;
+          if (modifier === 'AM' && hours === 12) hours = 0;
+          
+          return hours * 60 + minutes; // Convert to minutes for easy comparison
+        };
+        
+        return getStartTime(a.time) - getStartTime(b.time);
+      });
+  })();
+  
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
@@ -36,7 +65,25 @@
   }
   
   function getEventsForDate(date: string) {
-    return events.filter(event => event.date === date);
+    return events
+      .filter(event => event.date === date)
+      .sort((a, b) => {
+        // Sort events within the day by start time
+        const getStartTime = (timeStr: string) => {
+          const match = timeStr.match(/^(\d{1,2}:\d{2} [AP]M)/);
+          if (!match) return 0;
+          
+          const [time, modifier] = match[1].split(' ');
+          let [hours, minutes] = time.split(':').map(Number);
+          
+          if (modifier === 'PM' && hours !== 12) hours += 12;
+          if (modifier === 'AM' && hours === 12) hours = 0;
+          
+          return hours * 60 + minutes;
+        };
+        
+        return getStartTime(a.time) - getStartTime(b.time);
+      });
   }
   
   function previousMonth() {
@@ -91,12 +138,11 @@
     return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
   
-  // Admin modal state (same as faculty page)
-  let showAdminModal = false;
-  let adminUsername = "";
-  let adminPassword = "";
-  let loginError = "";
-  let isAdminLoggedIn = data.loggedIn || false;
+  // Check admin login state from cookies
+  let isAdminLoggedIn = false;
+  
+  // Cookie checking interval
+  let cookieCheckInterval: NodeJS.Timeout | null = null;
   
   // Real-time updates for events
   let updateInterval: NodeJS.Timeout | null = null;
@@ -144,6 +190,11 @@
   let tooltipPosition = { x: 0, y: 0, showAbove: false };
   let hoveredEventElement: HTMLElement | null = null;
   
+  // Day events modal state
+  let showDayEventsModal = false;
+  let selectedDayEvents: typeof events = [];
+  let selectedDateForModal: string | null = null;
+  
   function handleEventClick(event: typeof events[0]) {
     selectedEvent = event;
     showEventModal = true;
@@ -152,6 +203,18 @@
   function closeEventModal() {
     showEventModal = false;
     selectedEvent = null;
+  }
+  
+  function handleMoreClick(date: string, dayEvents: typeof events) {
+    selectedDayEvents = dayEvents;
+    selectedDateForModal = date;
+    showDayEventsModal = true;
+  }
+
+  function closeDayEventsModal() {
+    showDayEventsModal = false;
+    selectedDayEvents = [];
+    selectedDateForModal = null;
   }
   
   function handleEventHover(event: typeof events[0], mouseEvent: MouseEvent) {
@@ -233,28 +296,17 @@
       }
     }
     
-    // Close modal if clicking outside
-    if (showEventModal && !target.closest('.event-modal') && !target.closest('[data-event-trigger]')) {
+    // Handle modal closing - prioritize the topmost modal
+    if (showEventForm && !target.closest('.event-form-modal') && !target.closest('[data-edit-trigger]')) {
+      // If event form is open, only close it, don't touch the event modal
+      // Added check for edit button to prevent immediate closing when clicking edit
+      hideEventForm();
+    } else if (showDayEventsModal && !target.closest('.day-events-modal')) {
+      closeDayEventsModal();
+    } else if (showEventModal && !showEventForm && !target.closest('.event-modal') && !target.closest('[data-event-trigger]')) {
+      // Only close event modal if event form is not open
       closeEventModal();
     }
-  }
-  
-  function handleAdminClick() {
-    showAdminModal = true;
-  }
-    // Handle successful login from modal
-  function handleLoginSuccess(event: CustomEvent) {
-    console.log('Login successful:', event.detail);
-    isAdminLoggedIn = true;
-    startRealTimeUpdates();
-  }
-
-  // Handle modal close
-  function handleModalClose() {
-    showAdminModal = false;
-    adminUsername = "";
-    adminPassword = "";
-    loginError = "";
   }
   
   // Real-time update functions for events
@@ -289,11 +341,42 @@
     }
   }
   
+  // Function to check admin login status from cookies
+  function checkAdminStatus() {
+    if (browser) {
+      const authCookie = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('auth='));
+      const newAdminStatus = !!authCookie;
+      
+      if (newAdminStatus !== isAdminLoggedIn) {
+        isAdminLoggedIn = newAdminStatus;
+        console.log('Admin status changed:', isAdminLoggedIn);
+      }
+    }
+  }
+  
+  // Start checking for cookie changes periodically
+  function startCookieCheck() {
+    if (browser && !cookieCheckInterval) {
+      cookieCheckInterval = setInterval(checkAdminStatus, 500); // Check every 500ms
+    }
+  }
+  
+  // Stop checking for cookie changes
+  function stopCookieCheck() {
+    if (cookieCheckInterval) {
+      clearInterval(cookieCheckInterval);
+      cookieCheckInterval = null;
+    }
+  }
+  
   // Admin logout
   function handleAdminLogout() {
     isAdminLoggedIn = false;
     stopRealTimeUpdates();
     document.cookie = "auth=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT"; // Delete cookie
+    window.location.reload();
   }
   
   // Reactive statement to manage real-time updates
@@ -438,6 +521,12 @@
   onMount(() => {
     visible = true;
     
+    // Check admin status from cookie initially
+    checkAdminStatus();
+    
+    // Start checking for cookie changes periodically
+    startCookieCheck();
+    
     // Add document click listener for click-outside functionality
     document.addEventListener('click', handleDocumentClick);
     
@@ -449,6 +538,7 @@
   
   onDestroy(() => {
     stopRealTimeUpdates();
+    stopCookieCheck();
   });
 </script>
 
@@ -463,8 +553,6 @@
 
   <!-- Page Content (positioned above overlay) -->
   <div class="relative z-10 flex min-h-screen flex-col">
-    <!-- Navbar Component -->
-    <Navbar currentPage="CALENDAR" on:adminClick={handleAdminClick} />
     
     <!-- Main Content Area -->
     <main class="flex flex-grow flex-col items-center pb-0">
@@ -620,31 +708,63 @@
                     day === new Date().getDate()
                   }
                   
-                  <div class="p-1 md:p-2 h-20 md:h-24 border border-gray-200 rounded-lg hover:bg-green-50 transition-colors overflow-visible relative {isToday ? 'bg-yellow-100 border-yellow-400' : 'bg-white'}">
+                  <div class="p-1 md:p-2 h-20 md:h-24 border border-gray-200 rounded-lg hover:bg-green-50 transition-colors overflow-hidden relative {isToday ? 'bg-yellow-100 border-yellow-400' : 'bg-white'}">
                     <div class="text-sm md:text-base font-medium text-green-800 mb-1">
                       {day}
                     </div>
                     
                     <!-- Events for this day -->
-                    {#each dayEvents as event}
-                      <div 
-                        class="text-xs p-1 rounded mb-1 truncate cursor-pointer transition-all duration-200 {
-                          event.type === 'meeting' ? 'bg-blue-100 text-blue-800 hover:bg-blue-200' :
-                          event.type === 'event' ? 'bg-purple-100 text-purple-800 hover:bg-purple-200' :
-                          'bg-green-100 text-green-800 hover:bg-green-200'
-                        }"
-                        data-event-trigger
-                        on:click={() => handleEventClick(event)}
-                        on:mouseenter={(e) => handleEventHover(event, e)}
-                        on:mouseleave={handleEventLeave}
-                        on:keydown={(e) => e.key === 'Enter' && handleEventClick(event)}
-                        tabindex="0"
-                        role="button"
-                        aria-label="View event details: {event.title}"
-                      >
-                        {event.title}
+                    <div class="space-y-1 overflow-hidden">
+                      {#each dayEvents.slice(0, 2) as event, index}
+                        <div 
+                          class="text-xs p-1 rounded truncate cursor-pointer transition-all duration-200 {
+                            event.type === 'meeting' ? 'bg-blue-100 text-blue-800 hover:bg-blue-200' :
+                            event.type === 'event' ? 'bg-purple-100 text-purple-800 hover:bg-purple-200' :
+                            'bg-green-100 text-green-800 hover:bg-green-200'
+                          }"
+                          data-event-trigger
+                          on:click={() => handleEventClick(event)}
+                          on:mouseenter={(e) => handleEventHover(event, e)}
+                          on:mouseleave={handleEventLeave}
+                          on:keydown={(e) => e.key === 'Enter' && handleEventClick(event)}
+                          tabindex="0"
+                          role="button"
+                          aria-label="View event details: {event.title}"
+                        >
+                          {event.title}
+                        </div>
+                      {/each}
+                    </div>
+                    
+                    <!-- Small +n indicator in lower right corner -->
+                    {#if dayEvents.length > 2}
+                      <div class="absolute bottom-1 right-1 bg-blue-600 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center cursor-pointer hover:bg-blue-700 transition-colors shadow-sm group"
+                           on:click={(e) => {
+                             e.stopPropagation();
+                             handleMoreClick(dateString, dayEvents);
+                           }}
+                           on:keydown={(e) => {
+                             if (e.key === 'Enter') {
+                               e.stopPropagation();
+                               handleMoreClick(dateString, dayEvents);
+                             }
+                           }}
+                           tabindex="0"
+                           role="button"
+                           aria-label="View {dayEvents.length - 2} more events for this day">
+                        +{dayEvents.length - 2}
+                        
+                        <!-- Tooltip showing remaining events -->
+                        <div class="absolute bottom-6 right-0 bg-gray-900 text-white text-xs rounded-lg p-2 min-w-max opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10 shadow-lg">
+                          <div class="font-semibold mb-1">{dayEvents.length - 2} more event{dayEvents.length - 2 === 1 ? '' : 's'}:</div>
+                          {#each dayEvents.slice(2) as event}
+                            <div class="truncate max-w-40">{event.title}</div>
+                          {/each}
+                          <!-- Tooltip arrow -->
+                          <div class="absolute top-full right-2 w-0 h-0 border-l-2 border-r-2 border-t-4 border-l-transparent border-r-transparent border-t-gray-900"></div>
+                        </div>
                       </div>
-                    {/each}
+                    {/if}
                   </div>
                 {/each}
               </div>
@@ -675,7 +795,7 @@
               <!-- Upcoming Events -->
               <div class="bg-gray-50 rounded-xl p-4">
                 <div class="flex justify-between items-center mb-3">
-                  <h4 class="text-lg font-semibold text-green-800">Upcoming Events</h4>
+                  <h4 class="text-lg font-semibold text-green-800">These are 5 of the closest upcoming events: </h4>
                   {#if isAdminLoggedIn}
                     <button
                       on:click={showEventFormModal}
@@ -686,7 +806,7 @@
                   {/if}
                 </div>
                 <div class="space-y-2">
-                  {#each events.slice(0, 5) as event}
+                  {#each upcomingEvents.slice(0, 5) as event}
                     <div 
                       class="flex items-center gap-3 p-2 bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer"
                       data-event-trigger
@@ -720,16 +840,6 @@
       {/if}
     </main>
     
-    <!-- Admin Login Modal Component -->
-    <AdminLoginModal 
-      bind:showModal={showAdminModal}
-      bind:username={adminUsername}
-      bind:password={adminPassword}
-      bind:loginError={loginError}
-      on:loginSuccess={handleLoginSuccess}
-      on:close={handleModalClose}
-    />
-    
     <!-- Global Tooltip -->
     {#if showTooltip && hoveredEvent}
       <div 
@@ -746,10 +856,80 @@
       </div>
     {/if}
     
+    <!-- Day Events Modal -->
+    {#if showDayEventsModal && selectedDateForModal}
+      <div class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 pt-20 z-[99]" 
+           transition:fade={{ duration: 200 }}
+           on:click={closeDayEventsModal}
+           on:keydown={(e) => e.key === 'Escape' && closeDayEventsModal()}>
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[80vh] overflow-y-auto day-events-modal" 
+             transition:fly={{ y: 50, duration: 300 }}
+             on:click={(e) => e.stopPropagation()}>
+          <!-- Modal Header -->
+          <div class="bg-gradient-to-r from-green-600 to-green-700 text-white p-6 rounded-t-2xl">
+            <div class="flex justify-between items-start">
+              <div>
+                <h3 class="text-xl font-bold mb-2">Events for {selectedDateForModal}</h3>
+              </div>
+              <button
+                on:click={closeDayEventsModal}
+                class="text-white hover:text-green-200 transition-colors p-1"
+                aria-label="Close modal"
+              >
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          
+          <!-- Modal Body -->
+          <div class="p-6 space-y-3">
+            {#each selectedDayEvents as event}
+              <div 
+                class="flex items-center gap-3 p-2 bg-white rounded-lg shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer border"
+                data-event-trigger
+                on:click={(e) => { 
+                  e.stopPropagation(); 
+                  handleEventClick(event); 
+                  closeDayEventsModal(); 
+                }}
+                on:keydown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.stopPropagation();
+                    handleEventClick(event);
+                    closeDayEventsModal();
+                  }
+                }}
+                tabindex="0"
+                role="button"
+                aria-label="View event details: {event.title}"
+              >
+                <div class="w-3 h-3 rounded-full {
+                  event.type === 'meeting' ? 'bg-blue-500' :
+                  event.type === 'event' ? 'bg-purple-500' :
+                  'bg-green-500'
+                }"></div>
+                <div class="flex-1">
+                  <span class="text-sm font-medium text-gray-800">{event.title}</span>
+                  <span class="block text-xs text-gray-500">{event.time}</span>
+                </div>
+              </div>
+            {/each}
+          </div>
+        </div>
+      </div>
+    {/if}
+
     <!-- Event Details Modal -->
     {#if showEventModal && selectedEvent}
-      <div class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" transition:fade={{ duration: 200 }}>
-        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto event-modal" transition:fly={{ y: 50, duration: 300 }}>
+      <div class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 pt-20 z-[110]" 
+           transition:fade={{ duration: 200 }}
+           on:click={closeEventModal}
+           on:keydown={(e) => e.key === 'Escape' && closeEventModal()}>
+        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto event-modal" 
+             transition:fly={{ y: 50, duration: 300 }}
+             on:click={(e) => e.stopPropagation()}>
           <!-- Modal Header -->
           <div class="bg-gradient-to-r from-green-600 to-green-700 text-white p-6 rounded-t-2xl">
             <div class="flex justify-between items-start">
@@ -836,6 +1016,7 @@
                 <button
                   on:click={() => selectedEvent && editEvent(selectedEvent)}
                   class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                  data-edit-trigger
                 >
                   Edit
                 </button>
@@ -860,8 +1041,11 @@
     
     <!-- Add Event Form Modal -->
     {#if showEventForm}
-      <div class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" transition:fade={{ duration: 200 }}>
-        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto" transition:fly={{ y: 50, duration: 300 }}>
+      <div class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 pt-20 z-[100]" 
+           transition:fade={{ duration: 200 }}
+           on:click|self={hideEventForm}>
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[80vh] overflow-y-auto event-form-modal" 
+             transition:fly={{ y: 50, duration: 300 }}>
           <div class="bg-gradient-to-r from-green-600 to-green-700 text-white p-6 rounded-tl-2xl">
             <div class="flex justify-between items-center">
               <h3 class="text-xl font-bold">{isCreatingNew ? 'Add New Event' : 'Edit Event'}</h3>

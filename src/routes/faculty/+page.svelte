@@ -1,9 +1,8 @@
 <script lang="ts">
   import PersonNode from "$lib/components/PersonNode.svelte";
-  import Navbar from "$lib/components/navbar.svelte";
   import AdminLoginModal from "$lib/components/AdminLoginModal.svelte";
   import { fly, fade, slide } from 'svelte/transition';
-  import { onMount, afterUpdate } from 'svelte';
+  import { onMount, afterUpdate, onDestroy } from 'svelte';
   import { browser } from '$app/environment';
   import { invalidateAll } from '$app/navigation';
   export let data;
@@ -17,6 +16,7 @@
   }
 
   $: faculty = data.faculty;
+  $: schoolYearText = data.schoolYear || "School Year 2024-2025";
   
   let visible = false;
   let searchQuery = "";
@@ -45,6 +45,13 @@
 
   let isUpdating = false;
   
+  // Cookie checking for admin status
+  let cookieCheckInterval: NodeJS.Timeout | null = null;
+  
+  // School year text state
+  let showSchoolYearEdit = false;
+  let editingSchoolYear = "";
+  
   // Window width for responsive design
   let windowWidth = 1024; // Default to desktop width
   
@@ -58,27 +65,28 @@
     "Filipino",
     "Social Studies",
     "MAPEH",
-    "TLE"
+    "TLE",
+    "Maintenance"
   ];
   
   // Helper function to get the principal
   function getPrincipal() {
-    return faculty.find((f: Faculty) => f.role === "Principal");
+    return filteredFaculty.find((f: Faculty) => f.role === "Principal");
   }
   
   // Helper function to get the assistant principal
   function getAssistantPrincipal() {
-    return faculty.find((f: Faculty) => f.role === "Assistant Principal");
+    return filteredFaculty.find((f: Faculty) => f.role === "Assistant Principal");
   }
   
   // Helper function to get master teachers
   function getMasterTeachers() {
-    return faculty.filter((f: Faculty) => f.role === "Master Teacher");
+    return filteredFaculty.filter((f: Faculty) => f.role === "Master Teacher");
   }
   
   // Helper function to get regular teachers by department
   function getTeachersByDepartment(department: string) {
-    return faculty.filter((f: Faculty) =>
+    return filteredFaculty.filter((f: Faculty) =>
       f.department === department &&
       f.role !== "Master Teacher" &&
       f.role !== "Principal" &&
@@ -89,7 +97,8 @@
   // Filter faculty based on search and department selection
   $: filteredFaculty = faculty.filter((f: Faculty) => {
     const matchesSearch = f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         f.role.toLowerCase().includes(searchQuery.toLowerCase());
+                         f.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         f.department.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesDepartment = selectedDepartment === "All" || f.department === selectedDepartment;
     return matchesSearch && matchesDepartment;
   });
@@ -194,6 +203,71 @@
     }
   }
   
+  // School year editing functions
+  function startEditingSchoolYear() {
+    editingSchoolYear = schoolYearText;
+    showSchoolYearEdit = true;
+  }
+  
+  async function saveSchoolYear() {
+    if (editingSchoolYear.trim()) {
+      try {
+        const response = await fetch('/api/schoolyear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ schoolYear: editingSchoolYear.trim() })
+        });
+        
+        if (response.ok) {
+          schoolYearText = editingSchoolYear.trim();
+          showSchoolYearEdit = false;
+          showSuccessNotification('School year updated successfully!');
+        } else {
+          console.error('Failed to save school year');
+          showErrorNotification('Failed to save school year. Please try again.');
+        }
+      } catch (error) {
+        console.error('Error saving school year:', error);
+        showErrorNotification('An error occurred while saving. Please try again.');
+      }
+    }
+  }
+  
+  function cancelSchoolYearEdit() {
+    showSchoolYearEdit = false;
+    editingSchoolYear = "";
+  }
+  
+  // Function to check admin login status from cookies
+  function checkAdminStatus() {
+    if (browser) {
+      const authCookie = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('auth='));
+      const newAdminStatus = !!authCookie;
+      
+      if (newAdminStatus !== isAdminLoggedIn) {
+        isAdminLoggedIn = newAdminStatus;
+        console.log('Admin status changed:', isAdminLoggedIn);
+      }
+    }
+  }
+  
+  // Start checking for cookie changes periodically
+  function startCookieCheck() {
+    if (browser && !cookieCheckInterval) {
+      cookieCheckInterval = setInterval(checkAdminStatus, 500); // Check every 500ms
+    }
+  }
+  
+  // Stop checking for cookie changes
+  function stopCookieCheck() {
+    if (cookieCheckInterval) {
+      clearInterval(cookieCheckInterval);
+      cookieCheckInterval = null;
+    }
+  }
+  
   // Notification functions
   let notificationMessage = '';
   let notificationType: 'success' | 'error' = 'success';
@@ -238,6 +312,12 @@
   
   onMount(() => {
     visible = true;
+    checkAdminStatus();
+    startCookieCheck();
+  });
+  
+  onDestroy(() => {
+    stopCookieCheck();
   });
   
   afterUpdate(() => {
@@ -256,8 +336,6 @@
 
   <!-- Page Content (positioned above overlay) -->
   <div class="relative z-10 flex min-h-screen flex-col">
-    <!-- Navbar Component -->
-    <Navbar on:adminClick={handleAdminClick} />
     
     <!-- Main Content Area -->
     <main class="flex flex-grow flex-col items-center">
@@ -268,10 +346,6 @@
   <div class="h-32 w-32 md:h-40 md:w-40">
     <img src="/logo.png" alt="School Logo" class="h-full w-full object-contain drop-shadow-lg" />
   </div>
-  <!-- Title -->
-  <h2 class="text-xl md:text-3xl lg:text-4xl font-bold text-white">
-    FACULTY MEMBERS
-  </h2>
 </div>
 {/if}
       
@@ -285,7 +359,53 @@
             <div class="flex-1"></div>
             
             <!-- Center: Title -->
-            <h2 class="text-xl md:text-2xl lg:text-3xl font-bold md:pl-3 pr-4 md:pr-0">SCHOOL FACULTY</h2>
+            <div class="flex items-center gap-2">
+              {#if showSchoolYearEdit && isAdminLoggedIn}
+                <input
+                  type="text"
+                  bind:value={editingSchoolYear}
+                  class="text-xl md:text-2xl lg:text-3xl font-bold bg-white/20 text-white placeholder-white/70 border border-white/30 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-white/50"
+                  placeholder="Enter school year"
+                  on:keydown={(e) => {
+                    if (e.key === 'Enter') saveSchoolYear();
+                    if (e.key === 'Escape') cancelSchoolYearEdit();
+                  }}
+                  on:blur={saveSchoolYear}
+                  autofocus
+                />
+                <button
+                  on:click={saveSchoolYear}
+                  class="text-white hover:text-green-200 transition-colors"
+                  title="Save"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                </button>
+                <button
+                  on:click={cancelSchoolYearEdit}
+                  class="text-white hover:text-red-200 transition-colors"
+                  title="Cancel"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              {:else}
+                <h2 class="text-xl md:text-2xl lg:text-3xl font-bold md:pl-3 pr-4 md:pr-0">{schoolYearText.toUpperCase()}</h2>
+                {#if isAdminLoggedIn}
+                  <button
+                    on:click={startEditingSchoolYear}
+                    class="text-white hover:text-yellow-200 transition-colors ml-2"
+                    title="Edit school year"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                  </button>
+                {/if}
+              {/if}
+            </div>
             
             <!-- Right side: Admin controls -->
             <div class="flex-1 flex justify-end ml-2 sm:ml-4 md:ml-0">
@@ -321,11 +441,11 @@
             
             <!-- Faculty Header with Page Indicator -->
             <div class="flex justify-between items-center mb-6 flex-shrink-0">
+              <div class="w-16"></div> <!-- Spacer for balance -->
+              <h3 class="text-lg md:text-xl lg:text-2xl font-semibold text-green-800">School Faculty</h3>
               <div class="text-sm text-green-600 font-medium">
                 Page {currentPage} of 2
               </div>
-              <h3 class="text-lg md:text-xl lg:text-2xl font-semibold text-green-800">School Faculty</h3>
-              <div class="w-16"></div> <!-- Spacer for balance -->
             </div>
             
             <!-- Scrollable Content Area -->
@@ -413,7 +533,8 @@
                                 faculty.department === "Filipino" ? "#964B00" : 
                                 faculty.department === "Social Studies" ? "#10B981" : 
                                 faculty.department === "MAPEH" ? "#B200ED" : 
-                                faculty.department === "TLE" ? "#808080" : "#6B7280"
+                                faculty.department === "TLE" ? "#808080" : 
+                                faculty.department === "Maintenance" ? "#FF6600" : "#6B7280"
                     }
                     on:profileClick={handleProfileClick}
                   />
@@ -470,237 +591,273 @@
           <div class="w-full space-y-8 md:space-y-12">
             {#if currentPage === 1}
               <!-- Page 1: Leadership -->
-              <!-- Level 1: Principal -->
-              {#if getPrincipal()}
-                <div class="mt-20 space-y-8" in:fly={{ y: 30, duration: 600, delay: 300 }}>
-                  <!-- Principal Header -->
-                  <div class="text-center">
-                    <h4 class="text-base md:text-lg font-medium text-green-700 mb-2">School Principal</h4>
-                    <div class="flex justify-center">
-                      <div class="h-1 w-20 rounded-full bg-yellow-500"></div>
-                    </div>
-                  </div>
-                  
-                  <div class="flex justify-center">
-                    <div class="relative group">
-                      <PersonNode 
-                        name={getPrincipal()?.name || ""} 
-                        role={getPrincipal()?.role || ""} 
-                        email={getPrincipal()?.email || ""}
-                        number={getPrincipal()?.number || ""}
-                        departmentColor="#FFD700"
-                        scale={1.3}
-                        on:profileClick={handleProfileClick}
-                      />
-                      {#if isAdminLoggedIn && getPrincipal()}
-                        <div class="absolute -top-6 -right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:scale-130 flex gap-1">
-                          <button 
-                            on:click={() => openEditModal(getPrincipal())}
-                            class="bg-blue-500 hover:bg-blue-600 text-white p-1 rounded-full shadow-lg transform hover:scale-130 transition-all duration-200"
-                            title="Edit Faculty"
-                            aria-label="Edit Principal"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                          </button>
-                          <button 
-                            on:click={() => deleteFaculty(getPrincipal()?.id || 0)}
-                            class="bg-red-500 hover:bg-red-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
-                            title="Delete Faculty"
-                            aria-label="Delete Principal"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      {/if}
-                    </div>
-                  </div>
-                </div>
-              {/if}
               
-              <!-- Level 2: Assistant Principal -->
-              {#if getAssistantPrincipal()}
-                <div class="space-y-8" in:fly={{ y: 30, duration: 600, delay: 400 }}>
-                  <!-- Assistant Principal Header -->
-                  <div class="text-center">
-                    <h4 class="text-base md:text-lg font-medium text-green-700 mb-2">Assistant Principal</h4>
+              <!-- Show leadership sections only if no specific search is active or search includes leadership -->
+              {#if !searchQuery || (searchQuery && (getPrincipal() || getAssistantPrincipal()))}
+                <!-- Level 1: Principal -->
+                {#if getPrincipal()}
+                  <div class="mt-20 space-y-8" in:fly={{ y: 30, duration: 600, delay: 300 }}>
+                    <!-- Principal Header -->
+                    <div class="text-center">
+                      <h4 class="text-base md:text-lg font-medium text-green-700 mb-2">School Principal</h4>
+                      <div class="flex justify-center">
+                        <div class="h-1 w-20 rounded-full bg-yellow-500"></div>
+                      </div>
+                    </div>
+                    
                     <div class="flex justify-center">
-                      <div class="h-1 w-20 rounded-full bg-gray-400"></div>
+                      <div class="relative group">
+                        <PersonNode 
+                          name={getPrincipal()?.name || ""} 
+                          role={getPrincipal()?.role || ""} 
+                          email={getPrincipal()?.email || ""}
+                          number={getPrincipal()?.number || ""}
+                          departmentColor="#FFD700"
+                          scale={1.3}
+                          on:profileClick={handleProfileClick}
+                        />
+                        {#if isAdminLoggedIn && getPrincipal()}
+                          <div class="absolute -top-6 -right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:scale-130 flex gap-1">
+                            <button 
+                              on:click={() => openEditModal(getPrincipal())}
+                              class="bg-blue-500 hover:bg-blue-600 text-white p-1 rounded-full shadow-lg transform hover:scale-130 transition-all duration-200"
+                              title="Edit Faculty"
+                              aria-label="Edit Principal"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                            <button 
+                              on:click={() => deleteFaculty(getPrincipal()?.id || 0)}
+                              class="bg-red-500 hover:bg-red-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
+                              title="Delete Faculty"
+                              aria-label="Delete Principal"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        {/if}
+                      </div>
                     </div>
                   </div>
-                  
-                  <div class="flex justify-center">
-                    <div class="relative group">
-                      <PersonNode 
-                        name={getAssistantPrincipal()?.name || ""} 
-                        role={getAssistantPrincipal()?.role || ""} 
-                        email={getAssistantPrincipal()?.email || ""}
-                        number={getAssistantPrincipal()?.number || ""}
-                        departmentColor="#c0c0c0"
-                        scale={1.1}
-                        on:profileClick={handleProfileClick}
-                      />
-                      {#if isAdminLoggedIn && getAssistantPrincipal()}
-                        <div class="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:scale-105 flex gap-1">
-                          <button 
-                            on:click={() => openEditModal(getAssistantPrincipal())}
-                            class="bg-blue-500 hover:bg-blue-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
-                            title="Edit Faculty"
-                            aria-label="Edit Assistant Principal"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                          </button>
-                          <button 
-                            on:click={() => deleteFaculty(getAssistantPrincipal()?.id || 0)}
-                            class="bg-red-500 hover:bg-red-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
-                            title="Delete Faculty"
-                            aria-label="Delete Assistant Principal"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      {/if}
+                {/if}
+                
+                <!-- Level 2: Assistant Principal -->
+                {#if getAssistantPrincipal()}
+                  <div class="space-y-8" in:fly={{ y: 30, duration: 600, delay: 400 }}>
+                    <!-- Assistant Principal Header -->
+                    <div class="text-center">
+                      <h4 class="text-base md:text-lg font-medium text-green-700 mb-2">Assistant Principal</h4>
+                      <div class="flex justify-center">
+                        <div class="h-1 w-20 rounded-full bg-gray-400"></div>
+                      </div>
+                    </div>
+                    
+                    <div class="flex justify-center">
+                      <div class="relative group">
+                        <PersonNode 
+                          name={getAssistantPrincipal()?.name || ""} 
+                          role={getAssistantPrincipal()?.role || ""} 
+                          email={getAssistantPrincipal()?.email || ""}
+                          number={getAssistantPrincipal()?.number || ""}
+                          departmentColor="#c0c0c0"
+                          scale={1.1}
+                          on:profileClick={handleProfileClick}
+                        />
+                        {#if isAdminLoggedIn && getAssistantPrincipal()}
+                          <div class="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:scale-105 flex gap-1">
+                            <button 
+                              on:click={() => openEditModal(getAssistantPrincipal())}
+                              class="bg-blue-500 hover:bg-blue-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
+                              title="Edit Faculty"
+                              aria-label="Edit Assistant Principal"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                            <button 
+                              on:click={() => deleteFaculty(getAssistantPrincipal()?.id || 0)}
+                              class="bg-red-500 hover:bg-red-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
+                              title="Delete Faculty"
+                              aria-label="Delete Assistant Principal"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        {/if}
+                      </div>
                     </div>
                   </div>
-                </div>
+                {/if}
               {/if}
 
               <!-- Level 3: Master Teachers and their Department Teachers -->
               {#if getMasterTeachers().length > 0}
                 <div class="space-y-12">
-                  <h3 class="text-center text-lg md:text-xl font-semibold text-green-800">Departments and Faculty</h3>
+                  <!-- Only show the header if we're not searching or if search includes department faculty -->
+                  {#if !searchQuery || getMasterTeachers().some(m => getTeachersByDepartment(m.department).length > 0)}
+                    <h3 class="text-center text-lg md:text-xl font-semibold text-green-800">Departments and Faculty</h3>
+                  {/if}
                   
                   {#each getMasterTeachers() as master, deptIndex}
                     {@const departmentTeachers = getTeachersByDepartment(master.department)}
-                    <div class="space-y-6" in:fly={{ y: 30, duration: 600, delay: 500 + (deptIndex * 200) }}>
-                      <!-- Department Header -->
-                      <div class="text-center">
-                        <h4 class="text-base md:text-lg font-medium text-green-700 mb-2">{master.department} Department</h4>
-                        <div class="flex justify-center">
-                          <div class="h-1 w-20 rounded-full" 
-                               style={`background-color: ${
-                                 master.department === "Administration" ? "#FFFF00" : 
-                                 master.department === "Mathematics" ? "#3B82F6" : 
-                                 master.department === "Science" ? "#008000" : 
-                                 master.department === "English" ? "#FF0000" : 
-                                 master.department === "Filipino" ? "#964B00" : 
-                                 master.department === "Social Studies" ? "#10B981" : 
-                                 master.department === "MAPEH" ? "#B200ED" : 
-                                 master.department === "TLE" ? "#000000" : "#6B7280"
-                               }`}></div>
+                    <!-- Only show department if master teacher OR department teachers exist in filtered results -->
+                    {#if filteredFaculty.includes(master) || departmentTeachers.length > 0}
+                      <div class="space-y-6" in:fly={{ y: 30, duration: 600, delay: 500 + (deptIndex * 200) }}>
+                        <!-- Department Header -->
+                        <div class="text-center">
+                          <h4 class="text-base md:text-lg font-medium text-green-700 mb-2">{master.department} Department</h4>
+                          <div class="flex justify-center">
+                            <div class="h-1 w-20 rounded-full" 
+                                 style={`background-color: ${
+                                   master.department === "Administration" ? "#FFFF00" : 
+                                   master.department === "Mathematics" ? "#3B82F6" : 
+                                   master.department === "Science" ? "#008000" : 
+                                   master.department === "English" ? "#FF0000" : 
+                                   master.department === "Filipino" ? "#964B00" : 
+                                   master.department === "Social Studies" ? "#10B981" : 
+                                   master.department === "MAPEH" ? "#B200ED" : 
+                                   master.department === "TLE" ? "#000000" : 
+                                   master.department === "Maintenance" ? "#FF6600" : "#6B7280"
+                                 }`}></div>
+                          </div>
                         </div>
-                      </div>
-                      
-                      <!-- Master Teacher (Department Head) -->
-                      <div class="flex justify-center">
-                        <div class="relative group">
-                          <PersonNode 
-                            name={master.name} 
-                            role={`Master Teacher - ${master.department}`} 
-                            email={master.email || ""}
-                            number={master.number || ""}
-                            departmentColor={
-                                  master.department === "Administration" ? "#FFFF00" : 
-                                  master.department === "Mathematics" ? "#3B82F6" : 
-                                  master.department === "Science" ? "#008000" : 
-                                  master.department === "English" ? "#FF0000" : 
-                                  master.department === "Filipino" ? "#964B00" : 
-                                  master.department === "Social Studies" ? "#10B981" : 
-                                  master.department === "MAPEH" ? "#B200ED" : 
-                                  master.department === "TLE" ? "#000000" : "#6B7280"
-                            }
-                            scale={1.0}
-                            on:profileClick={handleProfileClick}
-                          />
-                          {#if isAdminLoggedIn}
-                            <div class="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:scale-105 flex gap-1">
-                              <button 
-                                on:click={() => openEditModal(master)}
-                                class="bg-blue-500 hover:bg-blue-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
-                                title="Edit Faculty"
-                                aria-label="Edit Master Teacher"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                              </button>
-                              <button 
-                                on:click={() => deleteFaculty(master.id)}
-                                class="bg-red-500 hover:bg-red-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
-                                title="Delete Faculty"
-                                aria-label="Delete Master Teacher"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
+                        
+                        <!-- Master Teacher (Department Head) - only show if in filtered results -->
+                        {#if filteredFaculty.includes(master)}
+                          <div class="flex justify-center">
+                            <div class="relative group">
+                              <PersonNode 
+                                name={master.name} 
+                                role={`Master Teacher - ${master.department}`} 
+                                email={master.email || ""}
+                                number={master.number || ""}
+                                departmentColor={
+                                      master.department === "Administration" ? "#FFFF00" : 
+                                      master.department === "Mathematics" ? "#3B82F6" : 
+                                      master.department === "Science" ? "#008000" : 
+                                      master.department === "English" ? "#FF0000" : 
+                                      master.department === "Filipino" ? "#964B00" : 
+                                      master.department === "Social Studies" ? "#10B981" : 
+                                      master.department === "MAPEH" ? "#B200ED" : 
+                                      master.department === "TLE" ? "#000000" : 
+                                      master.department === "Maintenance" ? "#FF6600" : "#6B7280"
+                                }
+                                scale={1.0}
+                                on:profileClick={handleProfileClick}
+                              />
+                              {#if isAdminLoggedIn}
+                                <div class="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:scale-105 flex gap-1">
+                                  <button 
+                                    on:click={() => openEditModal(master)}
+                                    class="bg-blue-500 hover:bg-blue-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
+                                    title="Edit Faculty"
+                                    aria-label="Edit Master Teacher"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                  </button>
+                                  <button 
+                                    on:click={() => deleteFaculty(master.id)}
+                                    class="bg-red-500 hover:bg-red-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
+                                    title="Delete Faculty"
+                                    aria-label="Delete Master Teacher"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              {/if}
                             </div>
-                          {/if}
-                        </div>
-                      </div>
-                      
-                      <!-- Department Teachers under the Master Teacher -->
-                      {#if departmentTeachers.length > 0}
-                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
-                          {#each departmentTeachers as teacher, j}
-                            <div class="flex justify-center" in:fly={{ y: 20, duration: 400, delay: 700 + (deptIndex * 200) + (j * 50) }}>
-                              <div class="relative group">
-                                <PersonNode 
-                                  name={teacher.name} 
-                                  role={teacher.role} 
-                                  email={teacher.email || ""}
-                                  number={teacher.number || ""}
-                                  scale={0.85}
-                                  departmentColor={
-                                    teacher.department === "Administration" ? "#FFFF00" : 
-                                    teacher.department === "Mathematics" ? "#3B82F6" : 
-                                    teacher.department === "Science" ? "#008000" : 
-                                    teacher.department === "English" ? "#FF0000" : 
-                                    teacher.department === "Filipino" ? "#964B00" : 
-                                    teacher.department === "Social Studies" ? "#10B981" : 
-                                    teacher.department === "MAPEH" ? "#B200ED" : 
-                                    teacher.department === "TLE" ? "#000000" : "#6B7280"
-                                  }
-                                  on:profileClick={handleProfileClick}
-                                />
-                                {#if isAdminLoggedIn}
-                                  <div class="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:scale-105 flex gap-1">
-                                    <button 
-                                      on:click={() => openEditModal(teacher)}
-                                      class="bg-blue-500 hover:bg-blue-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
-                                      title="Edit Faculty"
-                                      aria-label="Edit Teacher"
-                                    >
-                                      <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                      </svg>
-                                    </button>
-                                    <button 
-                                      on:click={() => deleteFaculty(teacher.id)}
-                                      class="bg-red-500 hover:bg-red-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
-                                      title="Delete Faculty"
-                                      aria-label="Delete Teacher"
-                                    >
-                                      <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                      </svg>
-                                    </button>
-                                  </div>
-                                {/if}
+                          </div>
+                        {/if}
+                        
+                        <!-- Department Teachers under the Master Teacher -->
+                        {#if departmentTeachers.length > 0}
+                          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6">
+                            {#each departmentTeachers as teacher, j}
+                              <div class="flex justify-center" in:fly={{ y: 20, duration: 400, delay: 700 + (deptIndex * 200) + (j * 50) }}>
+                                <div class="relative group">
+                                  <PersonNode 
+                                    name={teacher.name} 
+                                    role={teacher.role} 
+                                    email={teacher.email || ""}
+                                    number={teacher.number || ""}
+                                    scale={0.85}
+                                    departmentColor={
+                                      teacher.department === "Administration" ? "#FFFF00" : 
+                                      teacher.department === "Mathematics" ? "#3B82F6" : 
+                                      teacher.department === "Science" ? "#008000" : 
+                                      teacher.department === "English" ? "#FF0000" : 
+                                      teacher.department === "Filipino" ? "#964B00" : 
+                                      teacher.department === "Social Studies" ? "#10B981" : 
+                                      teacher.department === "MAPEH" ? "#B200ED" : 
+                                      teacher.department === "TLE" ? "#000000" : 
+                                      teacher.department === "Maintenance" ? "#FF6600" : "#6B7280"
+                                    }
+                                    on:profileClick={handleProfileClick}
+                                  />
+                                  {#if isAdminLoggedIn}
+                                    <div class="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:scale-105 flex gap-1">
+                                      <button 
+                                        on:click={() => openEditModal(teacher)}
+                                        class="bg-blue-500 hover:bg-blue-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
+                                        title="Edit Faculty"
+                                        aria-label="Edit Teacher"
+                                      >
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                        </svg>
+                                      </button>
+                                      <button 
+                                        on:click={() => deleteFaculty(teacher.id)}
+                                        class="bg-red-500 hover:bg-red-600 text-white p-1 rounded-full shadow-lg transform hover:scale-110 transition-all duration-200"
+                                        title="Delete Faculty"
+                                        aria-label="Delete Teacher"
+                                      >
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                  {/if}
+                                </div>
                               </div>
-                            </div>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
+                            {/each}
+                          </div>
+                        {/if}
+                      </div>
+                    {/if}
                   {/each}
+                </div>
+              {/if}
+              
+              <!-- No results found for hierarchical view -->
+              {#if filteredFaculty.length === 0}
+                <div class="text-center py-8 md:py-12">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 md:h-16 md:w-16 mx-auto text-green-600/50" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none">
+                    <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+                    <path d="M8 8a3.5 3 0 0 1 3.5 -3h1a3.5 3 0 0 1 3.5 3a3 3 0 0 1 -2 3a3 4 0 0 0 -2 4" />
+                    <path d="M12 19l0 .01" />
+                  </svg>
+                  <p class="mt-4 text-green-800 text-base md:text-lg">No faculty members found matching your criteria.</p>
+                  <button 
+                    class="mt-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                    on:click={() => {
+                      searchQuery = "";
+                      selectedDepartment = "All";
+                    }}
+                  >
+                    Reset Filters
+                  </button>
                 </div>
               {/if}
             {:else}
@@ -709,6 +866,7 @@
                 <h1 class="text-center text-lg md:text-3xl font-semibold text-green-800">Department Faculty</h1>
                 {#each getMasterTeachers() as master, deptIndex}
                   {@const teachers = getTeachersByDepartment(master.department)}
+                  <!-- Only show department if it has teachers in filtered results -->
                   {#if teachers.length > 0}
                     <div class="space-y-4" in:fly={{ y: 20, duration: 500, delay: 800 + (deptIndex * 200) }}>
                       <!-- Department Header -->
@@ -724,7 +882,8 @@
                                 master.department === "Filipino" ? "#964B00" : 
                                 master.department === "Social Studies" ? "#10B981" : 
                                 master.department === "MAPEH" ? "#B200ED" : 
-                                master.department === "TLE" ? "#000000" : "#6B7280"
+                                master.department === "TLE" ? "#000000" : 
+                                master.department === "Maintenance" ? "#FF6600" : "#6B7280"
                                }`}></div>
                         </div>
                       </div>
@@ -748,7 +907,8 @@
                                   teacher.department === "Filipino" ? "#964B00" : 
                                   teacher.department === "Social Studies" ? "#10B981" : 
                                   teacher.department === "MAPEH" ? "#B200ED" : 
-                                  teacher.department === "TLE" ? "#000000" : "#6B7280"
+                                  teacher.department === "TLE" ? "#000000" : 
+                                  teacher.department === "Maintenance" ? "#FF6600" : "#6B7280"
                                 }
                                 on:profileClick={handleProfileClick}
                               />
@@ -783,6 +943,27 @@
                     </div>
                   {/if}
                 {/each}
+                
+                <!-- No results found for Page 2 -->
+                {#if filteredFaculty.length === 0}
+                  <div class="text-center py-8 md:py-12">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 md:h-16 md:w-16 mx-auto text-green-600/50" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none">
+                      <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+                      <path d="M8 8a3.5 3 0 0 1 3.5 -3h1a3.5 3 0 0 1 3.5 3a3 3 0 0 1 -2 3a3 4 0 0 0 -2 4" />
+                      <path d="M12 19l0 .01" />
+                    </svg>
+                    <p class="mt-4 text-green-800 text-base md:text-lg">No faculty members found matching your criteria.</p>
+                    <button 
+                      class="mt-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                      on:click={() => {
+                        searchQuery = "";
+                        selectedDepartment = "All";
+                      }}
+                    >
+                      Reset Filters
+                    </button>
+                  </div>
+                {/if}
               </div>
             {/if}
           </div>
@@ -804,7 +985,8 @@
                        department === "Filipino" ? "#964B00" : 
                        department === "Social Studies" ? "#10B981" : 
                        department === "MAPEH" ? "#B200ED" : 
-                       department === "TLE" ? "#000000" : "#6B7280"
+                       department === "TLE" ? "#000000" : 
+                       department === "Maintenance" ? "#FF6600" : "#6B7280"
                      }`}></div>
                 <span class="text-xs font-medium text-green-900">{department}</span>
               </div>
@@ -860,45 +1042,52 @@
     
     <!-- Faculty Edit Modal -->
     {#if showEditModal}
-      <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" 
+      <div class="fixed inset-0 bg-white/20 backdrop-blur-sm flex items-center justify-center p-4 pt-20 z-50" 
            role="dialog" 
            aria-modal="true"
            tabindex="-1"
            on:click={(e) => { if (e.target === e.currentTarget) closeEditModal(); }}
-           on:keydown={(e) => e.key === 'Escape' && closeEditModal()}>
-        <div class="bg-white rounded-lg p-6 w-full max-w-md mx-4" 
-             role="document">
-          <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-900">
-              {isCreatingNew ? 'Add New Faculty' : 'Edit Faculty'}
-            </h3>
-            <button on:click={closeEditModal} class="text-gray-400 hover:text-gray-600" aria-label="Close modal">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+           on:keydown={(e) => e.key === 'Escape' && closeEditModal()}
+           transition:fade={{ duration: 200 }}>
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[80vh] overflow-y-auto faculty-edit-modal" 
+             role="document"
+             transition:fly={{ y: 50, duration: 300 }}>
+          <div class="bg-gradient-to-r from-green-600 to-green-700 text-white p-6 rounded-tl-2xl">
+            <div class="flex justify-between items-center">
+              <h3 class="text-xl font-bold">
+                {isCreatingNew ? 'Add New Faculty' : 'Edit Faculty'}
+              </h3>
+              <button 
+                on:click={closeEditModal} 
+                class="text-white hover:text-green-200 transition-colors"
+                aria-label="Close modal">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
           
-          <form on:submit|preventDefault={saveFaculty} class="space-y-4">
+          <form on:submit|preventDefault={saveFaculty} class="p-6 space-y-4">
             <div>
-              <label for="faculty-name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+              <label for="faculty-name" class="block text-sm font-medium text-gray-700 mb-2">Name</label>
               <input
                 id="faculty-name"
                 type="text"
                 bind:value={editForm.name}
                 required
-                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                 placeholder="Enter faculty name"
               />
             </div>
             
             <div>
-              <label for="faculty-role" class="block text-sm font-medium text-gray-700 mb-1">Role</label>
+              <label for="faculty-role" class="block text-sm font-medium text-gray-700 mb-2">Role</label>
               <select
                 id="faculty-role"
                 bind:value={editForm.role}
                 required
-                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
               >
                 <option value="">Select Role</option>
                 <option value="Principal">Principal</option>
@@ -910,12 +1099,12 @@
             </div>
             
             <div>
-              <label for="faculty-department" class="block text-sm font-medium text-gray-700 mb-1">Department</label>
+              <label for="faculty-department" class="block text-sm font-medium text-gray-700 mb-2">Department</label>
               <select
                 id="faculty-department"
                 bind:value={editForm.department}
                 required
-                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
               >
                 <option value="">Select Department</option>
                 <option value="Administration">Administration</option>
@@ -926,44 +1115,45 @@
                 <option value="Social Studies">Social Studies</option>
                 <option value="MAPEH">MAPEH</option>
                 <option value="TLE">TLE</option>
+                <option value="Maintenance">Maintenance</option>
               </select>
             </div>
             
             <div>
-              <label for="faculty-email" class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <label for="faculty-email" class="block text-sm font-medium text-gray-700 mb-2">Email</label>
               <input
                 id="faculty-email"
                 type="email"
                 bind:value={editForm.email}
-                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                 placeholder="Enter email address"
               />
             </div>
             
             <div>
-              <label for="faculty-number" class="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+              <label for="faculty-number" class="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
               <input
                 id="faculty-number"
                 type="tel"
                 bind:value={editForm.number}
-                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-green-500 focus:border-green-500"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                 placeholder="Enter phone number"
               />
             </div>
             
             <div class="flex gap-3 pt-4">
               <button
-                type="submit"
-                class="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
-              >
-                {isCreatingNew ? 'Add Faculty' : 'Update Faculty'}
-              </button>
-              <button
                 type="button"
                 on:click={closeEditModal}
-                class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 font-medium py-2 px-4 rounded-lg transition-colors"
+                class="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors"
               >
                 Cancel
+              </button>
+              <button
+                type="submit"
+                class="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+              >
+                {isCreatingNew ? 'Add Faculty' : 'Update Faculty'}
               </button>
             </div>
           </form>

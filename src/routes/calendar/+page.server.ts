@@ -8,7 +8,8 @@ export const load: PageServerLoad = async ({ cookies }) => {
 	
 	try {
 		// Load existing events from the database
-		const allEvents = await db.select().from(events);
+		const database = await db();
+		const allEvents = await database.select().from(events);
 		
 		// Transform the data to match the frontend format
 		const transformedEvents = allEvents.map(event => ({

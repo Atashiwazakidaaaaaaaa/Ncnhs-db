@@ -1,5 +1,5 @@
 import { db } from '$lib/server/db';
-import { faculty } from '$lib/server/db/schema';
+import { faculty, schoolyr } from '$lib/server/db/schema';
 import type { PageServerLoad } from './$types';
 
 // Fallback data for when database is not available
@@ -34,15 +34,23 @@ export const load: PageServerLoad = async ({ cookies }) => {
   const loggedIn = cookies.get('auth') === 'true';
 
   try {
-    const allFaculty = await db.select().from(faculty);
+    const database = await db();
+    const allFaculty = await database.select().from(faculty);
+    
+    // Fetch current school year
+    const currentSchoolYear = await database.select().from(schoolyr).limit(1);
+    const schoolYear = currentSchoolYear.length > 0 ? currentSchoolYear[0].schoolyr : 'School Year 2024-2025';
+    
     return {
       faculty: allFaculty,
+      schoolYear,
       loggedIn
     };
   } catch (error) {
     console.error('Database connection failed, using fallback data:', error);
     return {
       faculty: fallbackFaculty,
+      schoolYear: 'School Year 2024-2025',
       loggedIn
     };
   }

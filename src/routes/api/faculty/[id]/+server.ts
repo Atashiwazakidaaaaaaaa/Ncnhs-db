@@ -14,7 +14,8 @@ export const PUT: RequestHandler = async ({ params, request }) => {
       return json({ error: 'Name, role, and department are required' }, { status: 400 });
     }
     
-    await db.update(faculty)
+    const database = await db();
+    await database.update(faculty)
       .set({ 
         name, 
         role, 
@@ -25,7 +26,7 @@ export const PUT: RequestHandler = async ({ params, request }) => {
       .where(eq(faculty.id, id));
     
     // Get the updated faculty
-    const updatedFaculty = await db.select().from(faculty).where(eq(faculty.id, id));
+    const updatedFaculty = await database.select().from(faculty).where(eq(faculty.id, id));
     
     return json({ faculty: updatedFaculty[0] });
   } catch (error) {
@@ -39,7 +40,8 @@ export const DELETE: RequestHandler = async ({ params }) => {
   try {
     const id = parseInt(params.id);
     
-    await db.delete(faculty).where(eq(faculty.id, id));
+    const database = await db();
+    await database.delete(faculty).where(eq(faculty.id, id));
     
     return json({ success: true });
   } catch (error) {
