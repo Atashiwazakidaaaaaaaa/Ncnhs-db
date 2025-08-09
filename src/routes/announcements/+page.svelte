@@ -3,260 +3,283 @@
   import { onMount, onDestroy } from 'svelte';
   import { browser } from '$app/environment';
   import { enhance } from '$app/forms';
-  import type { PageData } from './$types';
-  import type { Announcement } from '$lib/server/db/schema';
+  import { invalidateAll } from '$app/navigation';
+  import type { PageData, ActionData } from './$types';
 
-  export let data: PageData;
+  let { data, form }: { data: PageData; form: ActionData } = $props();
 
-  // Get announcements from server data with proper typing
-  $: announcements = data.announcements || [];
+  // Corrected Interface to accurately reflect nullable fields
+  interface Announcement {
+    id: number;
+    title: string;
+    content: string | null; // Can be null from DB
+    date_posted: Date | string | null;
+    display_date: string | null; // Can be null from DB
+    category: string;
+    priority: string;
+    attachment?: string | null;
+    author: string;
+    is_active: number;
+    created_at: string | Date | null;
+    updated_at: string | Date | null;
+  }
 
-  let visible = false;
-  let errorMessage: string | null = null;
-  let selectedAnnouncementId: number | undefined;
-  let isEditingTitle = false;
-  let isEditingDate = false;
-  let isEditingContent = false;
-  let tempTitle = '';
-  let tempDate = '';
-  let tempContent = '';
+  // --- STATE MANAGEMENT ---
+  let announcements = $derived(data.announcements || []);
+  let loaded = $state(false);
+  let visible = $state(false);
+  let isProcessing = $state(false);
 
-  // Admin authentication state
-  let isAdminLoggedIn = false;
+  // State for inline editing
+  let selectedAnnouncementId = $state<number | undefined>(undefined);
+  let isEditingTitle = $state(false);
+  let isEditingDate = $state(false);
+  let isEditingContent = $state(false);
+  let tempTitle = $state('');
+  let tempDate = $state('');
+  let tempContent = $state('');
+
+  // Admin and navigation state
+  let isAdminLoggedIn = $state(false);
   let cookieCheckInterval: NodeJS.Timeout | null = null;
+  let currentAnnouncementIndex = $state(0);
+  let currentAnnouncement = $derived(announcements[currentAnnouncementIndex]);
+  let hasNextAnnouncement = $derived(currentAnnouncementIndex < announcements.length - 1);
+  let hasPreviousAnnouncement = $derived(currentAnnouncementIndex > 0);
 
-  // Loading state
-  let isLoading = false;
+  // New announcement modal state
+  let showNewAnnouncementModal = $state(false);
+  let newAnnouncement = $state({ title: '', display_date: '', content: '', category: 'general' });
+  let selectedImageFile = $state<File | null>(null);
+  let imagePreviewUrl = $state<string | null>(null);
+  let editImageFile = $state<File | null>(null);
+  let editImagePreviewUrl = $state<string | null>(null);
 
-  // Pagination state
-  let currentAnnouncementIndex = 0;
-  $: currentAnnouncement = announcements[currentAnnouncementIndex];
-  $: hasNextAnnouncement = currentAnnouncementIndex < announcements.length - 1;
-  $: hasPreviousAnnouncement = currentAnnouncementIndex > 0;
+  // --- FUNCTIONS ---
 
-  // New announcement state
-  let showNewAnnouncementModal = false;
-  let newAnnouncement = {
-    title: '',
-    display_date: '',
-    content: '',
-    category: 'general'
-  };
-  let selectedImageFile: File | null = null;
-  let imagePreviewUrl: string | null = null;
-  let editImageFile: File | null = null;
-  let editImagePreviewUrl: string | null = null;
-
-  // Function to check admin login status from cookies
   function checkAdminStatus() {
     if (browser) {
-      const authCookie = document.cookie
-        .split('; ')
-        .find(row => row.startsWith('auth='));
-      const newAdminStatus = !!authCookie;
-      
-      if (newAdminStatus !== isAdminLoggedIn) {
-        isAdminLoggedIn = newAdminStatus;
-        console.log('Admin status changed:', isAdminLoggedIn);
-      }
+      const authCookie = document.cookie.split('; ').find(row => row.startsWith('auth='));
+      isAdminLoggedIn = !!authCookie;
     }
   }
 
-  // Start checking for cookie changes periodically
   function startCookieCheck() {
     if (browser && !cookieCheckInterval) {
       cookieCheckInterval = setInterval(checkAdminStatus, 500);
     }
   }
 
-  // Stop checking for cookie changes
   function stopCookieCheck() {
-    if (cookieCheckInterval) {
-      clearInterval(cookieCheckInterval);
-      cookieCheckInterval = null;
-    }
+    if (cookieCheckInterval) clearInterval(cookieCheckInterval);
   }
 
+  // --- FIX APPLIED HERE ---
   function startEditingTitle(announcementId: number) {
-    const announcement = announcements.find((a: Announcement) => a.id === announcementId);
+    const announcement = announcements.find((a) => a.id === announcementId);
     if (announcement) {
       selectedAnnouncementId = announcementId;
-      tempTitle = announcement.title;
+      tempTitle = announcement.title ?? ''; // Defensive fallback
       isEditingTitle = true;
     }
   }
 
   function startEditingDate(announcementId: number) {
-    const announcement = announcements.find((a: Announcement) => a.id === announcementId);
+    const announcement = announcements.find((a) => a.id === announcementId);
     if (announcement) {
       selectedAnnouncementId = announcementId;
-      tempDate = announcement.display_date;
+      // Use nullish coalescing to safely assign string | null to a string variable
+      tempDate = announcement.display_date ?? '';
       isEditingDate = true;
     }
   }
 
   function startEditingContent(announcementId: number) {
-    const announcement = announcements.find((a: Announcement) => a.id === announcementId);
+    const announcement = announcements.find((a) => a.id === announcementId);
     if (announcement) {
       selectedAnnouncementId = announcementId;
-      tempContent = announcement.content;
+      // Use nullish coalescing to safely assign string | null to a string variable
+      tempContent = announcement.content ?? '';
       isEditingContent = true;
     }
   }
+  // --- END OF FIX ---
 
   function cancelEdit() {
     isEditingTitle = false;
     isEditingDate = false;
     isEditingContent = false;
     selectedAnnouncementId = undefined;
-    tempTitle = '';
-    tempDate = '';
-    tempContent = '';
     editImageFile = null;
+    if (editImagePreviewUrl) URL.revokeObjectURL(editImagePreviewUrl);
     editImagePreviewUrl = null;
   }
 
   function openNewAnnouncementModal() {
     showNewAnnouncementModal = true;
-    newAnnouncement = { 
-      title: '', 
-      display_date: '', 
-      content: '',
-      category: 'general'
-    };
-    selectedImageFile = null;
-    imagePreviewUrl = null;
   }
 
   function closeNewAnnouncementModal() {
     showNewAnnouncementModal = false;
-    newAnnouncement = { 
-      title: '', 
-      display_date: '', 
-      content: '',
-      category: 'general'
-    };
-    selectedImageFile = null;
-    imagePreviewUrl = null;
+    newAnnouncement = { title: '', display_date: '', content: '', category: 'general' };
+    removeSelectedImage();
   }
 
   function handleImageSelection(event: Event) {
-    const target = event.target as HTMLInputElement;
-    const file = target.files?.[0];
-    
-    if (file) {
-      selectedImageFile = file;
-      
-      // Create preview URL
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        imagePreviewUrl = e.target?.result as string;
-      };
-      reader.readAsDataURL(file);
-    } else {
-      selectedImageFile = null;
-      imagePreviewUrl = null;
-    }
+    const file = (event.target as HTMLInputElement).files?.[0];
+    selectedImageFile = file || null;
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    imagePreviewUrl = file ? URL.createObjectURL(file) : null;
   }
 
   function removeSelectedImage() {
     selectedImageFile = null;
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     imagePreviewUrl = null;
-    // Reset the file input
-    const fileInput = document.getElementById('imageUpload') as HTMLInputElement;
-    if (fileInput) {
-      fileInput.value = '';
-    }
+    const uploader = document.getElementById('imageUpload') as HTMLInputElement | null;
+    if (uploader) uploader.value = '';
   }
 
   function handleEditImageSelection(event: Event) {
-    const target = event.target as HTMLInputElement;
-    const file = target.files?.[0];
-    
-    if (file) {
-      editImageFile = file;
-      
-      // Create preview URL
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        editImagePreviewUrl = e.target?.result as string;
-      };
-      reader.readAsDataURL(file);
-    } else {
-      editImageFile = null;
-      editImagePreviewUrl = null;
-    }
+    const file = (event.target as HTMLInputElement).files?.[0];
+    editImageFile = file || null;
+    if (editImagePreviewUrl) URL.revokeObjectURL(editImagePreviewUrl);
+    editImagePreviewUrl = file ? URL.createObjectURL(file) : null;
   }
 
   function removeEditImage() {
     editImageFile = null;
+    if (editImagePreviewUrl) URL.revokeObjectURL(editImagePreviewUrl);
     editImagePreviewUrl = null;
-    // Reset the file input
-    const fileInput = document.getElementById('editImageUpload') as HTMLInputElement;
-    if (fileInput) {
-      fileInput.value = '';
+    const uploader = document.getElementById('editImageUpload') as HTMLInputElement | null;
+    if (uploader) uploader.value = '';
+  }
+  
+  async function saveAnnouncementUpdate(announcementId: number, updates: { [key: string]: any }, imageFile: File | null = null) {
+    if (isProcessing) {
+      alert('An operation is already in progress. Please wait.');
+      return;
     }
+    isProcessing = true;
+    
+    const formData = new FormData();
+    formData.append('id', announcementId.toString());
+    for (const key in updates) {
+      if (updates[key] !== null && updates[key] !== undefined) {
+        formData.append(key, updates[key]);
+      }
+    }
+    if (imageFile) formData.append('image', imageFile);
+    
+    try {
+      const response = await fetch('http://localhost/back-ends/update_announcement.php', { method: 'POST', body: formData });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || `Server responded with status ${response.status}`);
+      }
+      alert(result.message || 'Update successful!');
+      cancelEdit();
+      await invalidateAll();
+    } catch (error) {
+      console.error('Update Error:', error);
+      alert(`Update failed: ${(error as Error).message}`);
+    } finally {
+      isProcessing = false;
+    }
+  }
+
+  // --- IMPROVED SAVE FUNCTIONS ---
+  function saveTitle() {
+    if (!selectedAnnouncementId || !tempTitle.trim() || !currentAnnouncement) return;
+    const fullUpdatePayload = {
+      title: tempTitle,
+      content: currentAnnouncement.content ?? '',
+      display_date: currentAnnouncement.display_date ?? '',
+      category: currentAnnouncement.category,
+    };
+    saveAnnouncementUpdate(selectedAnnouncementId, fullUpdatePayload);
+  }
+
+  function saveDate() {
+    if (!selectedAnnouncementId || !tempDate.trim() || !currentAnnouncement) return;
+    const fullUpdatePayload = {
+      title: currentAnnouncement.title,
+      content: currentAnnouncement.content ?? '',
+      display_date: tempDate,
+      category: currentAnnouncement.category,
+    };
+    saveAnnouncementUpdate(selectedAnnouncementId, fullUpdatePayload);
+  }
+  
+  function saveContentWithImage() {
+    if (!selectedAnnouncementId || !tempContent.trim() || !currentAnnouncement) return;
+    const fullUpdatePayload = {
+      title: currentAnnouncement.title,
+      content: tempContent,
+      display_date: currentAnnouncement.display_date ?? '',
+      category: currentAnnouncement.category,
+    };
+    saveAnnouncementUpdate(selectedAnnouncementId, fullUpdatePayload, editImageFile);
   }
 
   function getCategoryIcon(category: string) {
-    switch (category) {
-      case 'academic': return '🎓';
-      case 'event': return '📅';
-      case 'maintenance': return '🔧';
-      case 'general': return '📢';
-      default: return '📢';
-    }
+    const icons: { [key: string]: string } = { academic: '🎓', event: '📅', maintenance: '🔧', general: '📢' };
+    return icons[category] || '📢';
   }
 
-  // Navigation functions
   function goToNextAnnouncement() {
     if (hasNextAnnouncement) {
       currentAnnouncementIndex++;
-      cancelEdit(); // Cancel any ongoing edits when navigating
+      cancelEdit();
     }
   }
 
   function goToPreviousAnnouncement() {
     if (hasPreviousAnnouncement) {
       currentAnnouncementIndex--;
-      cancelEdit(); // Cancel any ongoing edits when navigating
+      cancelEdit();
     }
   }
 
   function goToAnnouncementIndex(index: number) {
     if (index >= 0 && index < announcements.length) {
       currentAnnouncementIndex = index;
-      cancelEdit(); // Cancel any ongoing edits when navigating
+      cancelEdit();
     }
   }
 
-  // Handle keyboard navigation
   function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'ArrowLeft') {
-      goToPreviousAnnouncement();
-    } else if (event.key === 'ArrowRight') {
-      goToNextAnnouncement();
-    }
+    if (isEditingTitle || isEditingDate || isEditingContent) return;
+    if (event.key === 'ArrowLeft') goToPreviousAnnouncement();
+    if (event.key === 'ArrowRight') goToNextAnnouncement();
   }
 
+  // --- LIFECYCLE HOOKS ---
   onMount(() => {
     visible = true;
     checkAdminStatus();
     startCookieCheck();
-    
-    // Add keyboard event listener for navigation
-    if (browser) {
-      document.addEventListener('keydown', handleKeydown);
+    loaded = true;
+    if (browser) document.addEventListener('keydown', handleKeydown);
+  });
+
+  $effect(() => {
+    if (form?.success) {
+      if (browser) {
+        setTimeout(() => alert(form.message || 'Action successful!'), 100);
+      }
+      if ('action' in form && form.action === 'createAnnouncement') {
+        closeNewAnnouncementModal();
+      }
+    }
+    if (form?.error && browser) {
+      alert(form.error);
     }
   });
 
   onDestroy(() => {
     stopCookieCheck();
-    
-    // Remove keyboard event listener
-    if (browser) {
-      document.removeEventListener('keydown', handleKeydown);
-    }
+    if (browser) document.removeEventListener('keydown', handleKeydown);
   });
 </script>
 
@@ -264,513 +287,221 @@
   <title>Announcements - New Cabalan National High School</title>
 </svelte:head>
 
-<!-- Main container with background image -->
-<div class="relative min-h-screen bg-cover bg-center font-sans" style="background-image: url('/ncnhs.jpg'); background-attachment: scroll;">
-  <!-- Modern Gradient Overlay -->
-  <div class="absolute inset-0 bg-gradient-to-b from-green-900/40 via-green-800/20 to-yellow-500/30 mix-blend-overlay"></div>
-
+<!-- Main container -->
+<div class="relative min-h-screen font-sans">
   <!-- Page Content -->
   <div class="relative z-10 flex min-h-screen flex-col">
-    
-    <!-- Main Content Area -->
     <main class="flex flex-grow flex-col items-center">
-      <!-- School Logo -->
       {#if visible}
-        <div class="flex flex-col items-center justify-center text-center gap-2 mt-6 mb-4" in:fade={{ duration: 1000 }}>
-          <!-- Logo -->
-          <div class="h-32 w-32 md:h-40 md:w-40">
-            <img src="/logo.png" alt="School Logo" class="h-full w-full object-contain drop-shadow-lg" />
+        <div class="flex flex-col items-center justify-center text-center gap-2 mt-4 md:mt-6 mb-4" in:fade={{ duration: 1000 }}>
+          <div class="flex justify-center">
+            <img src="/ncnhs-logo-figma.png" alt="School Logo" class="logo" />
+            <style>.logo { width: 200px; height: auto; margin-bottom: 20px; margin-top: -10px; display: block; }</style>
           </div>
         </div>
       {/if}
       
-      <!-- Modern Announcements Container -->
       {#if visible}
-        <div class="w-full max-w-6xl mx-auto mb-8 flex flex-col" in:fly={{ y: 100, duration: 800, delay: 600 }}>
-          <!-- Header Section -->
-          <div class="rounded-t-2xl bg-gradient-to-r from-green-600 to-green-700 text-white py-4 shadow-lg">
-            <div class="flex justify-between items-center px-6">
-              <!-- Left side: Empty spacer -->
-              <div class="flex-1"></div>
-              
-              <!-- Center: Title -->
-              <div class="flex items-center gap-2">
-                <h2 class="text-xl md:text-2xl lg:text-3xl font-bold md:pl-3 pr-4 md:pr-0">SCHOOL ANNOUNCEMENTS</h2>
-              </div>
-              
-              <!-- Right side: Admin controls -->
-              <div class="flex-1 flex justify-end ml-2 sm:ml-4 md:ml-0">
+        <div class="w-full max-w-6xl mx-auto mb-8 flex flex-col px-4 sm:px-6 lg:px-8" in:fly={{ y: 100, duration: 800, delay: 600 }}>
+          <div class="rounded-t-2xl bg-gradient-to-r from-green-600 to-green-700 text-white py-3 md:py-4 shadow-lg">
+            <div class="flex justify-between items-center px-3 md:px-6 gap-2">
+              <div class="flex-1 min-w-0"><h2 class="text-sm sm:text-base md:text-xl lg:text-2xl xl:text-3xl font-bold truncate">SCHOOL ANNOUNCEMENTS</h2></div>
+              <div class="flex-shrink-0">
                 {#if isAdminLoggedIn}
-                  <div class="flex items-center gap-2">
-                    <button
-                      on:click={openNewAnnouncementModal}
-                      class="bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                      </svg>
-                      Add Announcement
-                    </button>
-                  </div>
+                  <button on:click={openNewAnnouncementModal} disabled={isProcessing} class="bg-white/20 hover:bg-white/30 text-white px-2 py-1 md:px-3 md:py-1 rounded-lg text-xs md:text-sm font-medium transition-colors flex items-center gap-1 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 md:h-4 md:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+                    <span class="hidden sm:inline">Add</span>
+                  </button>
                 {/if}
               </div>
             </div>
           </div>
           
-          <!-- Main Content Box -->
-          <div class="bg-gradient-to-r from-green-600 to-green-700 px-3 pt-3 pb-5 shadow-2xl min-h-[70vh] rounded-b-xl">
-            <div class="bg-white p-4 md:p-6 rounded-xl h-full flex flex-col">
-              
-              <!-- Announcements Header -->
-              <div class="flex justify-between items-center mb-6 flex-shrink-0">
-                <div class="w-16"></div> <!-- Spacer for balance -->
-                <h3 class="text-lg md:text-xl lg:text-2xl font-semibold text-green-800">Latest Updates</h3>
-                <div class="text-sm text-green-600 font-medium">
-                  {#if announcements.length > 0}
-                    {currentAnnouncementIndex + 1} of {announcements.length}
-                  {:else}
-                    0 announcements
-                  {/if}
-                </div>
+          <div class="bg-gradient-to-r from-green-600 to-green-700 px-2 md:px-3 pt-2 md:pt-3 pb-3 md:pb-5 shadow-2xl min-h-[70vh] rounded-b-xl">
+            <div class="bg-white p-3 md:p-4 lg:p-6 rounded-xl h-full flex flex-col">
+              <div class="flex justify-between items-center mb-4 md:mb-6 flex-shrink-0">
+                <div class="w-8 md:w-16"></div>
+                <h3 class="text-lg md:text-xl lg:text-2xl font-semibold text-green-800 text-center">Latest Updates</h3>
+                <div class="text-xs md:text-sm text-green-600 font-medium">{announcements.length > 0 ? `${currentAnnouncementIndex + 1} of ${announcements.length}` : '0 announcements'}</div>
               </div>
               
-              <!-- Scrollable Content Area -->
               <div class="flex-1 flex flex-col">
-                {#if isLoading}
-                  <div class="flex items-center justify-center py-12">
-                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
-                  </div>
-                {:else if errorMessage}
-                  <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-                    {errorMessage}
-                  </div>
+                {#if !loaded}
+                  <div class="flex items-center justify-center py-12"><div class="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div></div>
+                {:else if isProcessing && !isEditingTitle && !isEditingDate && !isEditingContent}
+                  <div class="flex items-center justify-center py-12 h-full"><div class="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div><p class="ml-4 text-gray-600">Processing...</p></div>
                 {:else if announcements.length === 0}
-                  <div class="text-center py-12">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3v6m0 0l-3-3m3 3l3-3" />
-                    </svg>
-                    <p class="text-gray-500 text-lg">No announcements available at this time.</p>
+                  <div class="text-center py-12 flex flex-col items-center justify-center h-full">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3v6m0 0l-3-3m3 3l3-3" /></svg>
+                    <p class="text-gray-500 text-lg">No announcements available.</p>
                   </div>
                 {:else}
-                  <!-- Single Announcement Display -->
                   <div class="flex-1 flex flex-col">
-                    <!-- Navigation Controls -->
-                    <div class="flex justify-between items-center mb-4">
-                      <!-- Previous Button -->
-                      <button
-                        on:click={goToPreviousAnnouncement}
-                        disabled={!hasPreviousAnnouncement}
-                        class="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        title="Previous announcement"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-                        </svg>
-                        Previous
-                      </button>
-
-                      <!-- Page Indicators -->
-                      {#if announcements.length > 1}
-                        <div class="flex items-center gap-2">
-                          {#each announcements as _, index}
-                            <button
-                              on:click={() => goToAnnouncementIndex(index)}
-                              class="w-3 h-3 rounded-full transition-colors {index === currentAnnouncementIndex ? 'bg-green-600' : 'bg-gray-300 hover:bg-gray-400'}"
-                              title="Go to announcement {index + 1}"
-                            ></button>
-                          {/each}
-                        </div>
-                      {/if}
-
-                      <!-- Next Button -->
-                      <button
-                        on:click={goToNextAnnouncement}
-                        disabled={!hasNextAnnouncement}
-                        class="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        title="Next announcement"
-                      >
-                        Next
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                        </svg>
-                      </button>
+                    <div class="flex justify-between items-center mb-4 gap-2">
+                      <button on:click={goToPreviousAnnouncement} disabled={!hasPreviousAnnouncement || isProcessing} class="flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-700 bg-white border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg><span class="hidden sm:inline">Prev</span></button>
+                      <div class="flex items-center gap-2">
+                        {#each announcements as _, index}
+                          <button on:click={() => goToAnnouncementIndex(index)} disabled={isProcessing} class="w-3 h-3 rounded-full transition-colors {index === currentAnnouncementIndex ? 'bg-green-600' : 'bg-gray-300 hover:bg-gray-400'} disabled:opacity-50"></button>
+                        {/each}
+                      </div>
+                      <button on:click={goToNextAnnouncement} disabled={!hasNextAnnouncement || isProcessing} class="flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-700 bg-white border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"><span class="hidden sm:inline">Next</span><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg></button>
                     </div>
 
-                    <!-- Current Announcement -->
                     {#if currentAnnouncement}
-                      <div class="bg-gray-50 rounded-xl p-6 border border-gray-200 hover:shadow-md transition-shadow duration-200 flex-1" in:fly={{ x: 50, duration: 300 }}>
-                        <!-- Announcement Header -->
+                      <div class="bg-gray-50 rounded-xl p-4 lg:p-6 border flex-1" in:fly={{ x: 50, duration: 300 }}>
                         <div class="flex justify-between items-start mb-4">
-                          <div class="flex-1">
-                            <!-- Title with Category Icon -->
+                          <div class="flex-1 mr-4">
                             <div class="flex items-center gap-2 mb-2">
                               <span class="text-xl">{getCategoryIcon(currentAnnouncement.category)}</span>
                               {#if isEditingTitle && selectedAnnouncementId === currentAnnouncement.id}
-                                <form method="POST" action="?/updateAnnouncement" use:enhance>
-                                  <input type="hidden" name="id" value={currentAnnouncement.id} />
-                                  <div class="flex items-center gap-2 flex-1">
-                                    <input 
-                                      name="title"
-                                      bind:value={tempTitle}
-                                      class="text-xl font-bold text-green-800 bg-white border border-green-300 rounded px-2 py-1 flex-1 focus:outline-none focus:ring-2 focus:ring-green-500"
-                                      on:keydown={(e) => {
-                                        if (e.key === 'Escape') cancelEdit();
-                                      }}
-                                      autofocus
-                                    />
-                                    <input type="hidden" name="content" value={currentAnnouncement.content} />
-                                    <input type="hidden" name="displayDate" value={currentAnnouncement.display_date} />
-                                    <input type="hidden" name="category" value={currentAnnouncement.category} />
-                                    <button type="submit" class="text-green-600 hover:text-green-800 p-1" title="Save">
-                                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                                      </svg>
-                                    </button>
-                                    <button type="button" on:click={cancelEdit} class="text-red-600 hover:text-red-800 p-1" title="Cancel">
-                                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                      </svg>
-                                    </button>
-                                  </div>
-                                </form>
+                                <input bind:value={tempTitle} on:keydown={(e) => { if (e.key === 'Enter') saveTitle(); if (e.key === 'Escape') cancelEdit(); }} class="text-xl font-bold text-green-800 bg-white border border-green-300 rounded px-2 py-1 flex-1"/>
                               {:else}
-                                <h3 class="text-xl font-bold text-green-800 flex-1">
+                                <h3 class="text-xl font-bold text-green-800 flex items-center">
                                   {currentAnnouncement.title}
-                                  {#if isAdminLoggedIn}
-                                    <button 
-                                      on:click={() => startEditingTitle(currentAnnouncement.id)} 
-                                      class="ml-2 text-sm text-blue-600 hover:text-blue-800 opacity-70 hover:opacity-100"
-                                      title="Edit title"
-                                    >
-                                      ✏️
-                                    </button>
-                                  {/if}
+                                  {#if isAdminLoggedIn} <button on:click={() => startEditingTitle(currentAnnouncement.id)} disabled={isProcessing} class="ml-2 text-blue-600 hover:text-blue-800 disabled:opacity-50">✏️</button>{/if}
                                 </h3>
                               {/if}
                             </div>
-                            
-                            <!-- Date -->
-                            {#if isEditingDate && selectedAnnouncementId === currentAnnouncement.id}
-                              <form method="POST" action="?/updateAnnouncement" use:enhance>
-                                <input type="hidden" name="id" value={currentAnnouncement.id} />
-                                <input type="hidden" name="title" value={currentAnnouncement.title} />
-                                <input type="hidden" name="content" value={currentAnnouncement.content} />
-                                <input type="hidden" name="category" value={currentAnnouncement.category} />
-                                <div class="flex items-center gap-2">
-                                  <input 
-                                    name="displayDate"
-                                    bind:value={tempDate}
-                                    class="text-sm text-gray-600 bg-white border border-green-300 rounded px-2 py-1 flex-1 focus:outline-none focus:ring-2 focus:ring-green-500"
-                                    on:keydown={(e) => {
-                                      if (e.key === 'Escape') cancelEdit();
-                                    }}
-                                    autofocus
-                                  />
-                                  <button type="submit" class="text-green-600 hover:text-green-800 p-1" title="Save">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                                    </svg>
-                                  </button>
-                                  <button type="button" on:click={cancelEdit} class="text-red-600 hover:text-red-800 p-1" title="Cancel">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                  </button>
-                                </div>
-                              </form>
-                            {:else}
-                              <div class="flex items-center gap-2 text-sm text-gray-600 mb-3">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3a2 2 0 012-2h4a2 2 0 012 2v4m-6 0V5a2 2 0 012-2v0a2 2 0 012 2v2m-6 0h6m-6 0l-1 12h8l-1-12" />
-                                </svg>
-                                <span>{currentAnnouncement.display_date}</span>
-                                {#if isAdminLoggedIn}
-                                  <button 
-                                    on:click={() => startEditingDate(currentAnnouncement.id)} 
-                                    class="text-xs text-blue-600 hover:text-blue-800 opacity-70 hover:opacity-100"
-                                    title="Edit date"
-                                  >
-                                    ✏️
-                                  </button>
-                                {/if}
-                              </div>
-                            {/if}
-
-                            <!-- Category Badge -->
-                            <div class="mb-3">
-                              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                {currentAnnouncement.category.charAt(0).toUpperCase() + currentAnnouncement.category.slice(1)}
-                              </span>
+                            <div class="flex items-center gap-2 text-sm text-gray-600 mb-3">
+                              {#if isEditingDate && selectedAnnouncementId === currentAnnouncement.id}
+                                <input type="date" bind:value={tempDate} on:keydown={(e) => { if (e.key === 'Enter') saveDate(); if (e.key === 'Escape') cancelEdit(); }} class="bg-white border border-green-300 rounded px-2 py-1"/>
+                              {:else}
+                                <span>{currentAnnouncement.display_date ?? 'No Date'}</span>
+                                {#if isAdminLoggedIn} <button on:click={() => startEditingDate(currentAnnouncement.id)} disabled={isProcessing} class="text-blue-600 hover:text-blue-800 disabled:opacity-50">✏️</button>{/if}
+                              {/if}
                             </div>
                           </div>
                           
                           {#if isAdminLoggedIn}
-                            <div class="flex items-center gap-2">
-                              <form method="POST" action="?/deleteAnnouncement" use:enhance>
-                                <input type="hidden" name="id" value={currentAnnouncement.id} />
-                                <button 
-                                  type="submit"
-                                  class="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-100 transition-colors"
-                                  title="Delete announcement"
-                                  on:click={(e) => {
-                                    if (!confirm('Are you sure you want to delete this announcement?')) {
-                                      e.preventDefault();
-                                    }
-                                  }}
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                  </svg>
-                                </button>
-                              </form>
-                            </div>
+                            <form
+                              method="POST"
+                              action="?/deleteAnnouncement"
+                              use:enhance={({ cancel }) => {
+                                if (!confirm('Are you sure you want to delete this announcement?')) {
+                                  cancel();
+                                  return;
+                                }
+
+                                isProcessing = true;
+                                return async ({ result }) => {
+                                  if (result.type === 'success') {
+                                    alert('Deleted successfully!');
+                                    currentAnnouncementIndex = 0;
+                                  } else if (result.type === 'failure') {
+                                    alert(result.data?.error || 'Failed to delete announcement.');
+                                  }
+                                  await invalidateAll();
+                                  isProcessing = false;
+                                };
+                              }}
+                            >
+                              <input type="hidden" name="id" value={currentAnnouncement.id} />
+                              <button type="submit" disabled={isProcessing} class="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                              </button>
+                            </form>
                           {/if}
                         </div>
                         
-                        <!-- Content -->
                         {#if isEditingContent && selectedAnnouncementId === currentAnnouncement.id}
-                          <form method="POST" action="?/updateAnnouncement" enctype="multipart/form-data" use:enhance={() => {
-                            return async ({ formData, update }) => {
-                              // Add the image file to the form data if selected
-                              if (editImageFile) {
-                                formData.append('image', editImageFile);
-                              }
-                              
-                              // Call the default update function
-                              await update();
-                              cancelEdit();
-                            };
-                          }}>
-                            <input type="hidden" name="id" value={currentAnnouncement.id} />
-                            <input type="hidden" name="title" value={currentAnnouncement.title} />
-                            <input type="hidden" name="displayDate" value={currentAnnouncement.display_date} />
-                            <input type="hidden" name="category" value={currentAnnouncement.category} />
-                            <div class="space-y-4">
+                           <div class="space-y-4">
+                              <textarea bind:value={tempContent} rows="8" class="w-full text-gray-700 leading-relaxed border rounded-md p-2 prose prose-sm max-w-none"></textarea>
                               <div>
-                                <label for="content" class="block text-sm font-medium text-gray-700 mb-2">Content</label>
-                                <textarea 
-                                  name="content"
-                                  bind:value={tempContent}
-                                  class="w-full h-32 p-3 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 resize-vertical"
-                                  placeholder="Enter announcement content..."
-                                ></textarea>
-                              </div>
-                              
-                              <div>
-                                <label for="editImageUpload" class="block text-sm font-medium text-gray-700 mb-2">Update Image (Optional)</label>
-                                <input
-                                  id="editImageUpload"
-                                  type="file"
-                                  accept="image/*"
-                                  on:change={handleEditImageSelection}
-                                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
-                                />
-                                {#if editImagePreviewUrl}
-                                  <div class="mt-3 relative">
-                                    <img src={editImagePreviewUrl} alt="Preview" class="max-w-full h-40 object-cover rounded-lg border" />
-                                    <button
-                                      type="button"
-                                      on:click={removeEditImage}
-                                      class="absolute top-2 right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
-                                      title="Remove image"
-                                    >
-                                      ×
-                                    </button>
-                                  </div>
-                                {:else if currentAnnouncement.attachment}
-                                  <div class="mt-3">
-                                    <p class="text-sm text-gray-600 mb-2">Current image:</p>
-                                    <img src={currentAnnouncement.attachment} alt="Current" class="max-w-full h-40 object-cover rounded-lg border" />
-                                  </div>
-                                {/if}
-                              </div>
-                              
-                              <div class="flex justify-end gap-2">
-                                <button type="submit" class="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 transition-colors">
-                                  Save
-                                </button>
-                                <button type="button" on:click={cancelEdit} class="bg-gray-400 text-white px-3 py-1 rounded hover:bg-gray-500 transition-colors">
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          </form>
+                                 <label for="editImageUpload" class="block text-sm font-medium text-gray-700">Change Image (optional):</label>
+                                 <input type="file" id="editImageUpload" on:change={handleEditImageSelection} accept="image/*" class="mt-1 text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"/>
+                                 {#if editImagePreviewUrl}
+                                   <div class="mt-2 relative inline-block">
+                                     <img src={editImagePreviewUrl} alt="New preview" class="max-w-xs h-auto rounded shadow" />
+                                     <button on:click={removeEditImage} class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 leading-none text-xs" aria-label="Remove image">&#x2715;</button>
+                                   </div>
+                                 {/if}
+                               </div>
+                               <div class="flex gap-2">
+                                 <button on:click={saveContentWithImage} disabled={isProcessing} class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">Save</button>
+                                 <button on:click={cancelEdit} class="px-4 py-2 text-gray-600 border rounded-lg hover:bg-gray-50">Cancel</button>
+                               </div>
+                           </div>
                         {:else}
                           <div class="text-gray-700 leading-relaxed prose prose-sm max-w-none">
-                            {@html currentAnnouncement.content}
-                            {#if isAdminLoggedIn}
-                              <button 
-                                on:click={() => startEditingContent(currentAnnouncement.id)} 
-                                class="ml-2 text-sm text-blue-600 hover:text-blue-800 opacity-70 hover:opacity-100"
-                                title="Edit content"
-                              >
-                                ✏️
-                              </button>
-                            {/if}
+                            {@html currentAnnouncement.content ?? ''}
+                            {#if isAdminLoggedIn} <button on:click={() => startEditingContent(currentAnnouncement.id)} disabled={isProcessing} class="ml-2 text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50">✏️</button>{/if}
                           </div>
-                          
-                          <!-- Display image if available -->
                           {#if currentAnnouncement.attachment}
-                            <div class="mt-4">
-                              <img 
-                                src={currentAnnouncement.attachment} 
-                                alt="Related to {currentAnnouncement.title}" 
-                                class="max-w-full h-auto rounded-lg shadow-md border border-gray-200 hover:shadow-lg transition-shadow duration-200"
-                                loading="lazy"
-                              />
-                            </div>
+                            <div class="mt-4"><img src={currentAnnouncement.attachment} alt="Attachment" class="max-w-full h-auto rounded-lg shadow-md"/></div>
                           {/if}
                         {/if}
                       </div>
                     {/if}
                   </div>
                 {/if}
-                
               </div>
             </div>
           </div>
         </div>
       {/if}
     </main>
-    
-    <!-- Modern Footer -->
-    <footer class="bg-green-900/80 text-white py-3 md:py-4 backdrop-blur-md border-t border-green-700/30">
-      <div class="container mx-auto text-center text-xs md:text-sm">
-        <p>© {new Date().getFullYear()} New Cabalan National High School. All rights reserved.</p>
-        <p class="mt-1 md:mt-2 text-yellow-300/80 text-[10px] md:text-xs">Empowering students through education since 1979</p>
-      </div>
-    </footer>
   </div>
 </div>
 
 <!-- New Announcement Modal -->
 {#if showNewAnnouncementModal}
-  <div class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 pt-20 z-50" 
-       transition:fade={{ duration: 200 }}
-       on:click={closeNewAnnouncementModal}
-       on:keydown={(e) => e.key === 'Escape' && closeNewAnnouncementModal()}>
-    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto" 
-         transition:fly={{ y: 50, duration: 300 }}
-         on:click={(e) => e.stopPropagation()}>
-      <!-- Modal Header -->
-      <div class="bg-gradient-to-r from-green-600 to-green-700 text-white p-6 rounded-t-2xl">
-        <div class="flex justify-between items-center">
-          <h3 class="text-xl font-bold">Create New Announcement</h3>
-          <button
-            on:click={closeNewAnnouncementModal}
-            class="text-white hover:text-green-200 transition-colors p-1"
-            aria-label="Close modal"
-          >
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+  <div class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" on:click={closeNewAnnouncementModal}>
+    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" on:click|stopPropagation>
+      <div class="bg-gradient-to-r from-green-600 to-green-700 text-white p-6 flex justify-between items-center">
+        <h3 class="text-xl font-bold">Create New Announcement</h3>
+        <button on:click={closeNewAnnouncementModal} class="p-1"><svg class="w-6 h-6" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
       </div>
       
-      <!-- Modal Body -->
-      <form method="POST" action="?/createAnnouncement" enctype="multipart/form-data" use:enhance={() => {
-        return async ({ update }) => {
-          // Call the default update function and close modal
-          await update();
-          closeNewAnnouncementModal();
-        };
-      }}>
-        <div class="p-6 space-y-4">
-          <div>
-            <label for="title" class="block text-sm font-medium text-gray-700 mb-2">Title</label>
-            <input
-              id="title"
-              name="title"
-              type="text"
-              bind:value={newAnnouncement.title}
-              placeholder="Enter announcement title"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-              required
-            />
-          </div>
-          
-          <div>
-            <label for="displayDate" class="block text-sm font-medium text-gray-700 mb-2">Event time</label>
-            <input
-              id="displayDate"
-              name="displayDate"
-              type="text"
-              bind:value={newAnnouncement.display_date}
-              placeholder="e.g., August 5th, 2025"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-              required
-            />
-          </div>
-
-          <div>
-            <label for="category" class="block text-sm font-medium text-gray-700 mb-2">Category</label>
-            <select
-              id="category"
-              name="category"
-              bind:value={newAnnouncement.category}
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-            >
-              <option value="general">General</option>
-              <option value="academic">Academic</option>
-              <option value="event">Event</option>
-              <option value="maintenance">Maintenance</option>
-            </select>
-          </div>
-
-          <div>
-            <label for="imageUpload" class="block text-sm font-medium text-gray-700 mb-2">Image (Optional)</label>
-            <input
-              id="imageUpload"
-              name="image"
-              type="file"
-              accept="image/*"
-              on:change={handleImageSelection}
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
-            />
-            {#if imagePreviewUrl}
-              <div class="mt-3 relative">
-                <img src={imagePreviewUrl} alt="Preview" class="max-w-full h-40 object-cover rounded-lg border" />
-                <button
-                  type="button"
-                  on:click={removeSelectedImage}
-                  class="absolute top-2 right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
-                  title="Remove image"
-                >
-                  ×
-                </button>
+      <form method="POST" action="?/createAnnouncement" enctype="multipart/form-data" class="p-6 space-y-4" use:enhance>
+        <div>
+          <label for="title" class="block text-sm font-medium text-gray-700">Title</label>
+          <input type="text" name="title" id="title" bind:value={newAnnouncement.title} required class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm">
+        </div>
+        <div>
+          <label for="displayDate" class="block text-sm font-medium text-gray-700">Display Date</label>
+          <input type="date" name="displayDate" id="displayDate" bind:value={newAnnouncement.display_date} required class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm">
+        </div>
+        <div>
+          <label for="category" class="block text-sm font-medium text-gray-700">Category</label>
+          <select name="category" id="category" bind:value={newAnnouncement.category} class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm">
+            <option value="general">📢 General</option>
+            <option value="academic">🎓 Academic</option>
+            <option value="event">📅 Event</option>
+            <option value="maintenance">🔧 Maintenance</option>
+          </select>
+        </div>
+        <div>
+          <label for="content" class="block text-sm font-medium text-gray-700">Content</label>
+          <textarea name="content" id="content" rows="6" bind:value={newAnnouncement.content} required class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"></textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Attachment Image (Optional)</label>
+          <div class="mt-1 flex items-center justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
+            <div class="space-y-1 text-center">
+              <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true"><path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              <div class="flex text-sm text-gray-600">
+                <label for="imageUpload" class="relative cursor-pointer bg-white rounded-md font-medium text-green-600 hover:text-green-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-green-500">
+                  <span>Upload a file</span>
+                  <input id="imageUpload" name="image" type="file" class="sr-only" on:change={handleImageSelection} accept="image/png, image/jpeg, image/gif, image/webp">
+                </label>
+                <p class="pl-1">or drag and drop</p>
               </div>
-            {/if}
+              <p class="text-xs text-gray-500">PNG, JPG, GIF up to 5MB</p>
+            </div>
           </div>
-          
-          <div>
-            <label for="content" class="block text-sm font-medium text-gray-700 mb-2">Content</label>
-            <textarea
-              id="content"
-              name="content"
-              bind:value={newAnnouncement.content}
-              placeholder="Enter announcement content (HTML supported)"
-              rows="8"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-vertical"
-              required
-            ></textarea>
+        </div>
+        {#if imagePreviewUrl}
+          <div class="text-center">
+            <p class="text-sm font-medium text-gray-700">Image Preview:</p>
+            <div class="mt-2 relative inline-block">
+              <img src={imagePreviewUrl} alt="Image Preview" class="h-48 w-auto rounded-lg shadow-md">
+              <button type="button" on:click={removeSelectedImage} class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 leading-none text-xs" aria-label="Remove image">&#x2715;</button>
+            </div>
           </div>
-          
-          <div class="flex justify-end gap-3 pt-4">
-            <button
-              type="button"
-              on:click={closeNewAnnouncementModal}
-              class="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-            >
-              Create Announcement
-            </button>
-          </div>
+        {/if}
+        <div class="flex justify-end gap-3 pt-4 border-t">
+          <button type="button" on:click={closeNewAnnouncementModal} class="px-4 py-2 text-gray-600 bg-gray-100 border rounded-lg hover:bg-gray-200">Cancel</button>
+          <button type="submit" disabled={isProcessing} class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed">Create Announcement</button>
         </div>
       </form>
     </div>

@@ -107,7 +107,18 @@
 <div class="page-container">
     <Navbar />
     <main style="background-image: url('/ncnhs.jpg');">
-        <img src="/logo.png" alt="School Logo" class="school-logo" />
+    <img src="/logo.png" alt="School Logo" class="logo" />
+        <style>
+            .logo {
+                width: 200px;
+                height: auto;
+                margin-bottom: 20px;
+                margin-top: -10px;
+                margin-left: auto;
+                margin-right: auto;
+                display: block;
+            }
+        </style>
         <div class="title-container">
             <!-- Global Announcement Title: Montserrat ExtraBold, Centered -->
             <h3 class="announcement-title font-serif font-extrabold">ANNOUNCEMENT</h3>

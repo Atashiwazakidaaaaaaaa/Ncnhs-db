@@ -1,58 +1,116 @@
 import { fail } from '@sveltejs/kit';
-import type { Actions } from './$types';
+import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { announcements } from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
-import fs from 'fs/promises';
-import path from 'path';
+import { eq, desc } from 'drizzle-orm';
 
-const UPLOAD_DIR = path.resolve('static/uploads');
-
-// Ensure the upload directory exists
-const ensureUploadDir = async () => {
+export const load: PageServerLoad = async () => {
 	try {
-		await fs.mkdir(UPLOAD_DIR, { recursive: true });
+		const database = await db();
+		
+		const allAnnouncements = await database
+			.select()
+			.from(announcements)    
+			.where(eq(announcements.is_active, 1))
+			.orderBy(desc(announcements.created_at));
+
+		return {
+			announcements: allAnnouncements
+		};
 	} catch (error) {
-		console.error('Error creating upload directory:', error);
+		console.error('Error loading announcements:', error);
+		return {
+			announcements: [],
+			error: 'Failed to load announcements'
+		};
 	}
 };
 
-ensureUploadDir();
-
 export const actions: Actions = {
-	uploadImage: async ({ request }) => {
-		const formData = await request.formData();
-		const file = formData.get('attachment') as File;
-		const announcementId = formData.get('announcementId') as string;
-
-		if (!file) {
-			return fail(400, { error: 'No file was uploaded.' });
-		}
-
-		if (!announcementId) {
-			return fail(400, { error: 'Announcement ID is missing.' });
-		}
-
+	createAnnouncement: async ({ request }) => {
 		try {
-			const fileExtension = path.extname(file.name);
-			const newFileName = `${announcementId}${fileExtension}`;
-			const filePath = path.join(UPLOAD_DIR, newFileName);
-
-			// Save the file to the server
-			await fs.writeFile(filePath, Buffer.from(await file.arrayBuffer()));
-
-			const fileUrl = `/uploads/${newFileName}`;
-
-			// Update the announcement in the database
-			await db
-				.update(announcements)
-				.set({ attachment: fileUrl })
-				.where(eq(announcements.id, announcementId));
-
-			return { success: true, filePath: fileUrl };
+			const database = await db();
+			const formData = await request.formData();
+			
+			const title = formData.get('title') as string;
+			const display_date = formData.get('display_date') as string;
+			const content = formData.get('content') as string;
+			const category = formData.get('category') as string;
+			const imageFile = formData.get('image') as File;
+			
+			let imageData: string | null = null;
+			let filename: string | null = null;
+			
+			if (imageFile && imageFile.size > 0) {
+				const arrayBuffer = await imageFile.arrayBuffer();
+				const buffer = Buffer.from(arrayBuffer);
+				imageData = `data:${imageFile.type};base64,${buffer.toString('base64')}`;
+				filename = imageFile.name;
+			}
+			
+			const result = await database.insert(announcements).values({
+				title,
+				content,
+				date_posted: new Date().toISOString().split('T')[0] as any,
+				display_date,
+				category,
+				attachment: imageData,
+				image_filename: filename,
+				author: 'Administrator',
+				is_active: 1
+			} as any);
+			
+			return { success: true, message: 'Announcement created successfully' };
 		} catch (error) {
-			console.error('Error uploading file:', error);
-			return fail(500, { error: 'Failed to upload file.' });
+			console.error('Create announcement error:', error);
+			return fail(500, { error: 'Failed to create announcement' });
+		}
+	},
+
+	updateAnnouncement: async ({ request }) => {
+		try {
+			const database = await db();
+			const formData = await request.formData();
+			
+			const id = parseInt(formData.get('id') as string);
+			const title = formData.get('title') as string;
+			const display_date = formData.get('display_date') as string;
+			const content = formData.get('content') as string;
+			
+			const updateData: any = {};
+			if (title) updateData.title = title;
+			if (display_date) updateData.display_date = display_date;
+			if (content) updateData.content = content;
+			updateData.updated_at = new Date();
+			
+			await database
+				.update(announcements)
+				.set(updateData)
+				.where(eq(announcements.id, id));
+			
+			return { success: true, message: 'Announcement updated successfully' };
+		} catch (error) {
+			console.error('Update announcement error:', error);
+			return fail(500, { error: 'Failed to update announcement' });
+		}
+	},
+
+	deleteAnnouncement: async ({ request }) => {
+		try {
+			const database = await db();
+			const formData = await request.formData();
+			
+			const id = parseInt(formData.get('id') as string);
+			
+			await database
+				.update(announcements)
+				.set({ is_active: 0 })
+				.where(eq(announcements.id, id));
+			
+			return { success: true, message: 'Announcement deleted successfully' };
+		} catch (error) {
+			console.error('Delete announcement error:', error);
+			return fail(500, { error: 'Failed to delete announcement' });
 		}
 	}
 };

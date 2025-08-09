@@ -1,205 +1,215 @@
 <script lang="ts">
-  import { fly, fade, slide } from 'svelte/transition';
-  import { createEventDispatcher } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { user } from '$lib/stores/user';
+  
+  export let open = false;
+  export let close = () => {};
 
-  const dispatch = createEventDispatcher();
+  let username = "";
+  let password = "";
 
-  // Props
-  export let showModal = false;
-  export let username = "";
-  export let password = "";
-  export let loginError = "";
+  async function login() {
+    const formLogin = new FormData();
+    formLogin.append("username", username);
+    formLogin.append("password", password);
 
-  // Admin login function
-  async function handleAdminLogin() {
-    if (!username || !password) {
-      loginError = "Please enter both username and password";
-      return;
-    }
-    
-    // Clear previous errors
-    loginError = "";
-    
     try {
-      console.log('Attempting admin login with:', { username });
-      
-      // Use the correct API endpoint
-      const response = await fetch('http://localhost:80/test-login.php', {
+      const res = await fetch('http://localhost/back-ends/login.php', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({
-          username,
-          password
-        })
+        body: formLogin,
+        credentials: 'include'
       });
 
-      console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
+      const data = await res.json();
 
-      // Check if response is ok
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      // Parse JSON response
-      const data = await response.json();
-      console.log('API response:', data);
-      
       if (data.success) {
-        // Success - API returned success: true
-        document.cookie = "auth=true; path=/; max-age=3600"; // Set cookie for 1 hour
-        
-        // Dispatch success event
-        dispatch('loginSuccess', {
-          token: data.token,
-          admin: data.admin
-        });
-        
-        closeModal();
+        // Save to localStorage and store
+        const userData = { username };
+        localStorage.setItem('userData', JSON.stringify(userData));
+        user.set(userData);
+
+        // Set auth cookie for cross-project compatibility
+        document.cookie = 'auth=true; path=/; max-age=86400'; // 24 hours
+
+        goto("/admin");
+        close();
       } else {
-        // API returned success: false with error message
-        loginError = data.error || "Login failed";
+        alert(data.message || 'Login failed');
       }
     } catch (error) {
       console.error('Login error:', error);
-      // Handle network/connection errors
-      if (error instanceof Error && error.message.includes('Failed to fetch')) {
-        loginError = "Cannot connect to server. Please check if MAMP is running.";
-      } else if (error instanceof Error) {
-        loginError = `Connection error: ${error.message}`;
-      } else {
-        loginError = "Connection error. Please try again.";
-      }
+      alert('Connection error. Please check if MAMP is running.');
     }
-  }
-  
-  function closeModal() {
-    showModal = false;
-    username = "";
-    password = "";
-    loginError = "";
-    
-    // Dispatch close event
-    dispatch('close');
   }
 </script>
 
-<!-- Admin Login Modal -->
-{#if showModal}
-  <div 
-    class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" 
-    in:fade={{ duration: 200 }}
-    on:click|self={closeModal}
-    on:keydown={(e) => e.key === 'Escape' && closeModal()}
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="modal-title"
-    tabindex="-1"
-  >
-    <div 
-      class="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-md relative" 
-      in:fly={{ y: 50, duration: 300 }}
-    >
-      
-      <!-- Close Button -->
-      <button 
-        class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors z-10"
-        on:click={closeModal}
-        aria-label="Close modal"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-        </svg>
+{#if open}
+  <div class="modal-backdrop" on:click={close} role="dialog" aria-modal="true" aria-labelledby="login-title">
+    <div class="signin-box" on:click|stopPropagation role="document">
+      <img src="/ncnhs-logo-figma.png" alt="NCNHS Logo" class="school-logo" />
+      <button class="close-btn" on:click={close} aria-label="Close login modal">
+        <img src="/X-icon.png" alt="Close" class="close-icon" />
       </button>
+      
+      <h2 id="login-title" class="visually-hidden">Admin Login</h2>
+      
+      <form on:submit|preventDefault={login}>
+        <b class="username">USERNAME</b>
+        <div class="input-group mb-2">
+          <span class="usericon">
+            <img src="/admin-user-icon.png" alt="User icon" class="iconuser" />
+          </span>
+          <input
+            type="text"
+            placeholder="Username"
+            class="form-control mb-2"
+            bind:value={username}
+            required
+            aria-label="Username"
+          />
+        </div>
 
-      <!-- School Logo -->
-      <div class="flex justify-center mb-6">
-        <div class="w-24 h-24 flex items-center justify-center">
-          <img src="/logo.png" alt="School Logo" class="w-full h-full object-contain" />
+        <b class="username">PASSWORD</b>
+        <div class="input-group mb-2">
+          <span class="usericon">
+            <img src="/admin-password-icon.png" alt="Password icon" class="iconuser" />
+          </span>
+          <input
+            type="password"
+            bind:value={password}
+            placeholder="Password"
+            class="form-control mb-2"
+            required
+            aria-label="Password"
+          />
         </div>
-      </div>
-      
-      <!-- Hidden Modal Title for Accessibility -->
-      <h2 id="modal-title" class="sr-only">Admin Login</h2>
-      
-      <!-- Login Form -->
-      <form on:submit|preventDefault={handleAdminLogin} class="space-y-6">
-        <!-- Username Field -->
-        <div>
-          <label for="admin-username" class="block text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wide">
-            Username
-          </label>
-          <div class="flex items-center border-2 border-gray-300 rounded-lg overflow-hidden focus-within:border-green-500 transition-colors">
-            <div class="bg-teal-600 px-4 py-3.5 flex items-center">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-            </div>
-            <input 
-              id="admin-username"
-              type="text" 
-              bind:value={username}
-              class="flex-1 px-3 py-3 text-gray-700 bg-gray-200 focus:outline-none focus:bg-white transition-colors border-0 m-0"
-              placeholder="Admin"
-              required
-            />
-          </div>
-        </div>
-        
-        <!-- Password Field -->
-        <div>
-          <label for="admin-password" class="block text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wide">
-            Password
-          </label>
-          <div class="flex items-center border-2 border-gray-300 rounded-lg overflow-hidden focus-within:border-green-500 transition-colors">
-            <div class="bg-teal-600 px-4 py-3.5 flex items-center">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-            </div>
-            <input 
-              id="admin-password"
-              type="password" 
-              bind:value={password}
-              class="flex-1 px-3 py-3 text-gray-700 bg-gray-200 focus:outline-none focus:bg-white transition-colors border-0 m-0"
-              placeholder="Enter password"
-              required
-            />
-          </div>
-        </div>
-        
-        <!-- Error Message -->
-        {#if loginError}
-          <div class="bg-red-50 border border-red-200 rounded-lg p-3" in:slide={{ duration: 200 }}>
-            <div class="flex items-center">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span class="text-sm text-red-700">{loginError}</span>
-            </div>
-          </div>
-        {/if}
-        
-        <!-- Action Buttons -->
-        <div class="flex gap-3 pt-2">
-          <button
-            type="button"
-            class="flex-1 px-6 py-3 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors font-semibold uppercase tracking-wide"
-            on:click={closeModal}
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            class="flex-1 px-6 py-3 text-white bg-green-500 rounded-lg hover:bg-green-600 transition-colors font-semibold uppercase tracking-wide shadow-md hover:shadow-lg"
-          >
-            Login
-          </button>
+
+        <div class="lower-buttons">
+          <button type="button" class="btn btn-secondary" on:click={close}>CANCEL</button>
+          <button type="submit" class="btn btn-primary">LOGIN</button>
         </div>
       </form>
     </div>
   </div>
 {/if}
+
+<style>
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .signin-box {
+    background-color: #ffffff;
+    padding: 2rem;
+    border-radius: 15px;
+    z-index: 1000;
+    min-width: 400px;
+    max-width: 90vw;
+    border: solid 2px #9eb1b2;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+    position: relative;
+  }
+
+  .school-logo {
+    width: 100px;
+    height: auto;
+    display: block;
+    margin: 0 auto 1rem;
+  }
+
+  .close-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 5px;
+  }
+
+  .close-icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .username {
+    font-size: 0.9rem;
+    font-weight: bold;
+    display: block;
+    text-align: center;
+    margin-bottom: 0.5rem;
+  }
+
+  .input-group {
+    display: flex;
+    margin-bottom: 1rem;
+  }
+
+  .usericon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 45px;
+    background-color: #096B68;
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+    border: 1px solid #000000;
+    border-right: none;
+  }
+
+  .iconuser {
+    width: 24px;
+    height: 24px;
+  }
+
+  .form-control {
+    flex-grow: 1;
+    border-radius: 0 8px 8px 0;
+    padding: 10px;
+    border: 1px solid #000000;
+    background-color: #CCE1DD;
+  }
+
+  .lower-buttons {
+    display: flex;
+    justify-content: center;
+    margin-top: 1.5rem;
+    gap: 1rem;
+  }
+
+  .btn {
+    border-radius: 8px;
+    padding: 10px 20px;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+  }
+
+  .btn-secondary {
+    background-color: #f0ad4e;
+    color: white;
+  }
+
+  .btn-primary {
+    background-color: #5cb85c;
+    color: white;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+</style>

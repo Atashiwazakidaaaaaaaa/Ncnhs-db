@@ -1,607 +1,563 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import Navbar from '$lib/components/navbar.svelte';
-	// --- All your existing interfaces and constants ---
-	interface Announcement {
-		id: string;
-		title: string;
-		date: string;
-		content: string;
-	}
-	const API_URL = 'http://localhost/PHP/api/api.php';
+	import { fly } from 'svelte/transition';
+	import { enhance } from '$app/forms';
+	import type { PageData, ActionData } from './$types';
 
-	// --- All your existing state variables ---
-	let announcements: Announcement[] = [];
-	let isLoading = true;
+	let { data, form }: { data: PageData; form: ActionData } = $props();
+
+	// Use the announcements from your existing system
+	let announcements = data.announcements || [];
+	let currentAnnouncementIndex = 0;
+	let isLoading = false;
 	let errorMessage: string | null = null;
-	let selectedAnnouncementId: string | undefined;
+
+	// Admin authentication state (using your existing pattern)
+	let isAdminLoggedIn = $state(false);
+	let cookieCheckInterval: NodeJS.Timeout | null = null;
+
+	// Edit states
 	let isEditingTitle = false;
 	let isEditingDate = false;
 	let isEditingContent = false;
+	let selectedAnnouncementId: number | null = null;
 	let tempTitle = '';
 	let tempDate = '';
 	let tempContent = '';
-	let isManageMenuOpen = false;
 
-	// --- Your existing saveChanges function (no changes needed) ---
-	async function saveChanges(announcementToSave: Announcement) {
-		// ... same as before
-		try {
-			const response = await fetch(API_URL, {
-				method: 'PUT',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify(announcementToSave)
-			});
+	// New announcement modal
+	let showNewAnnouncementModal = false;
+	let newAnnouncement = {
+		title: '',
+		display_date: '',
+		content: '',
+		category: 'general'
+	};
 
-			if (!response.ok) {
-				throw new Error('Failed to save changes to the server.');
-			}
+	// Reactive statements
+	let currentAnnouncement = $derived(announcements[currentAnnouncementIndex]);
+	let hasNextAnnouncement = $derived(currentAnnouncementIndex < announcements.length - 1);
+	let hasPreviousAnnouncement = $derived(currentAnnouncementIndex > 0);
 
-			// Optionally show a success message to the user
-			console.log('Changes saved successfully!');
-			return true;
-		} catch (error) {
-			console.error('Error saving changes:', error);
-			errorMessage = 'Could not save changes. Please try again.';
-			return false;
+	// Check admin login status (using your existing pattern)
+	function checkAdminLogin() {
+		if (typeof document !== 'undefined') {
+			const adminCookie = document.cookie
+				.split('; ')
+				.find(row => row.startsWith('admin_logged_in='));
+			isAdminLoggedIn = adminCookie ? adminCookie.split('=')[1] === 'true' : false;
 		}
 	}
 
-	// --- UPDATED: Function to handle creating a new announcement ---
-	async function handleNewAnnouncement() {
-		if (confirm('Are you sure you want to create a new announcement?')) {
-			const newAnn: Omit<Announcement, 'id'> = {
-				title: 'New Announcement Title',
-				date: new Date().toISOString().split('T')[0], // Format as YYYY-MM-DD
-				content: ''
-			};
-
-			try {
-				const response = await fetch(API_URL, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(newAnn)
-				});
-
-				if (!response.ok) {
-					throw new Error('Failed to create new announcement on the server.');
-				}
-
-				const result = await response.json();
-				const createdAnn: Announcement = { ...newAnn, id: result.id };
-
-				announcements = [createdAnn, ...announcements];
-				selectedAnnouncementId = createdAnn.id;
-			} catch (error) {
-				console.error('Error creating announcement:', error);
-				errorMessage = 'Could not create a new announcement.';
+	onMount(() => {
+		checkAdminLogin();
+		cookieCheckInterval = setInterval(checkAdminLogin, 500);
+		return () => {
+			if (cookieCheckInterval) {
+				clearInterval(cookieCheckInterval);
 			}
-		}
-	}
-
-	// --- UPDATED: Function to handle deleting an announcement ---
-	async function handleDeleteAnnouncement() {
-		if (!currentAnnouncement) return;
-
-		if (confirm('Are you sure you want to permanently delete this announcement?')) {
-			try {
-				// Append the ID as a query parameter for a DELETE request
-				const response = await fetch(`${API_URL}?id=${currentAnnouncement.id}`, {
-					method: 'DELETE'
-				});
-
-				if (!response.ok) {
-					throw new Error('Failed to delete announcement on the server.');
-				}
-
-				// If successful, remove it from the local list
-				announcements = announcements.filter((ann) => ann.id !== currentAnnouncement.id);
-
-				if (announcements.length > 0) {
-					selectedAnnouncementId = announcements[0].id;
-				} else {
-					selectedAnnouncementId = undefined;
-				}
-			} catch (error) {
-				console.error('Error deleting announcement:', error);
-				errorMessage = 'Could not delete the announcement.';
-			}
-		}
-	}
-
-	// --- Your existing onMount and reactive statements (no changes needed) ---
-	onMount(async () => {
-		try {
-			const response = await fetch(API_URL);
-			if (!response.ok) throw new Error(`Server responded with status: ${response.status}`);
-
-			announcements = await response.json();
-
-			if (announcements.length > 0) {
-				selectedAnnouncementId = announcements[0].id;
-			}
-		} catch (error) {
-			console.error('Error fetching announcements:', error);
-			errorMessage = 'Could not load announcements from the server.';
-		} finally {
-			isLoading = false;
-		}
+		};
 	});
 
-	$: currentAnnouncement = announcements.find((ann) => ann.id === selectedAnnouncementId);
-	$: currentIndex = announcements.findIndex((ann) => ann.id === selectedAnnouncementId);
-	$: hasPrevious = currentIndex > 0;
-	$: hasNext = currentIndex < announcements.length - 1;
+	// Navigation functions
+	function goToNextAnnouncement() {
+		if (hasNextAnnouncement) {
+			currentAnnouncementIndex++;
+			cancelEdit();
+		}
+	}
 
-	$: if (currentAnnouncement) {
+	function goToPreviousAnnouncement() {
+		if (hasPreviousAnnouncement) {
+			currentAnnouncementIndex--;
+			cancelEdit();
+		}
+	}
+
+	function goToAnnouncementIndex(index: number) {
+		if (index >= 0 && index < announcements.length) {
+			currentAnnouncementIndex = index;
+			cancelEdit();
+		}
+	}
+
+	// Edit functions
+	function startEditingTitle(announcementId: number) {
+		const announcement = announcements.find((a: any) => a.id === announcementId);
+		if (announcement) {
+			selectedAnnouncementId = announcementId;
+			tempTitle = announcement.title;
+			isEditingTitle = true;
+		}
+	}
+
+	function startEditingDate(announcementId: number) {
+		const announcement = announcements.find((a: any) => a.id === announcementId);
+		if (announcement) {
+			selectedAnnouncementId = announcementId;
+			tempDate = announcement.display_date;
+			isEditingDate = true;
+		}
+	}
+
+	function startEditingContent(announcementId: number) {
+		const announcement = announcements.find((a: any) => a.id === announcementId);
+		if (announcement) {
+			selectedAnnouncementId = announcementId;
+			tempContent = announcement.content;
+			isEditingContent = true;
+		}
+	}
+
+	function cancelEdit() {
 		isEditingTitle = false;
 		isEditingDate = false;
 		isEditingContent = false;
+		selectedAnnouncementId = null;
+		tempTitle = '';
+		tempDate = '';
+		tempContent = '';
 	}
 
-	function goToPrevious() {
-		if (hasPrevious) selectedAnnouncementId = announcements[currentIndex - 1].id;
+	// Modal functions
+	function openNewAnnouncementModal() {
+		showNewAnnouncementModal = true;
 	}
 
-	function goToNext() {
-		if (hasNext) selectedAnnouncementId = announcements[currentIndex + 1].id;
+	function closeNewAnnouncementModal() {
+		showNewAnnouncementModal = false;
+		newAnnouncement = {
+			title: '',
+			display_date: '',
+			content: '',
+			category: 'general'
+		};
 	}
+
+	// Format date helper
+	function formatDate(dateString: string) {
+		const date = new Date(dateString);
+		return date.toLocaleDateString('en-US', { 
+			year: 'numeric', 
+			month: 'long', 
+			day: 'numeric' 
+		});
+	}
+
+	// Handle keyboard navigation
+	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === 'ArrowLeft') {
+			goToPreviousAnnouncement();
+		} else if (event.key === 'ArrowRight') {
+			goToNextAnnouncement();
+		}
+	}
+
+	let visible = true;
 </script>
 
-<!-- The rest of your HTML remains exactly the same -->
-<div class="page-container">
-	<Navbar />
-	<main style="background-image: url('/ncnhs.jpg');">
-		<!-- ... all your existing HTML ... -->
-		<img src="/logo.png" alt="School Logo" class="school-logo" />
-		<div class="title-container">
-			<h3 class="announcement-title font-serif font-extrabold">ADMIN PANEL</h3>
-			{#if announcements.length > 0}
-				<div class="action-buttons-container">
-					<button on:click={() => isManageMenuOpen = !isManageMenuOpen} class="action-btn manage-btn"> Manage </button>
-					{#if isManageMenuOpen}
-						<div class="manage-menu">
-							<button on:click={() => { handleNewAnnouncement(); isManageMenuOpen = false; }} class="action-btn add-btn"> New </button>
-							<button on:click={() => { handleDeleteAnnouncement(); isManageMenuOpen = false; }} class="action-btn delete-btn"> Delete </button>
+<svelte:head>
+	<title>Admin Panel - New Cabalan National High School</title>
+</svelte:head>
+
+<svelte:window on:keydown={handleKeydown} />
+
+<!-- Use your existing layout pattern -->
+<div class="relative min-h-screen bg-cover bg-center font-sans" 
+     style="background-image: url('{isAdminLoggedIn ? '/adminbackground.png' : '/ncnhs.jpg'}'); background-attachment: scroll;">
+	<div class="absolute inset-0 bg-black opacity-40"></div>
+	
+	<div class="relative z-10 flex min-h-screen flex-col">
+		<main class="flex flex-grow flex-col items-center pb-0">
+			{#if visible}
+				<div class="w-full max-w-6xl mx-auto mb-8 flex flex-col" in:fly={{ y: 100, duration: 800, delay: 600 }}>
+					<!-- Header with your existing green gradient -->
+					<div class="bg-gradient-to-r from-green-600 to-green-700 px-3 pt-3 pb-5 shadow-2xl min-h-[70vh] rounded-b-xl">
+						<div class="bg-white p-4 md:p-6 rounded-xl h-full flex flex-col">
+							
+							<!-- Admin Panel Title -->
+							<div class="text-center mb-6">
+								<h1 class="text-3xl md:text-4xl font-bold text-green-800 mb-2">Admin Panel - Announcements</h1>
+								<p class="text-green-600 text-lg">Manage school announcements</p>
+							</div>
+
+							<!-- Admin Controls -->
+							{#if isAdminLoggedIn}
+								<div class="mb-4 flex justify-between items-center">
+									<div class="text-sm text-gray-600">
+										{#if announcements.length > 0}
+											Showing announcement {currentAnnouncementIndex + 1} of {announcements.length}
+										{/if}
+									</div>
+									<button
+										on:click={openNewAnnouncementModal}
+										class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+									>
+										+ New Announcement
+									</button>
+								</div>
+							{/if}
+
+							<!-- Main Content Area -->
+							<div class="flex-1 flex flex-col">
+								{#if announcements.length === 0}
+									<div class="flex-1 flex items-center justify-center">
+										<div class="text-center">
+											<p class="text-gray-500 text-lg mb-4">No announcements available.</p>
+											{#if isAdminLoggedIn}
+												<button
+													on:click={openNewAnnouncementModal}
+													class="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+												>
+													Create First Announcement
+												</button>
+											{/if}
+										</div>
+									</div>
+								{:else if currentAnnouncement}
+									<div class="flex-1 flex flex-col">
+										<!-- Single Announcement Display -->
+										<div class="bg-gray-50 rounded-xl p-6 border border-gray-200 hover:shadow-md transition-shadow duration-200 flex-1" in:fly={{ x: 50, duration: 300 }}>
+											
+											<!-- Title Section -->
+											<div class="flex justify-between items-start mb-4">
+												{#if isAdminLoggedIn}
+													<div class="flex items-center gap-2">
+														<form method="POST" action="?/deleteAnnouncement" use:enhance>
+															<input type="hidden" name="id" value={currentAnnouncement.id} />
+															<button 
+																type="submit"
+																class="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-100 transition-colors"
+																title="Delete announcement"
+																on:click={(e) => {
+																	if (!confirm('Are you sure you want to delete this announcement?')) {
+																		e.preventDefault();
+																	}
+																}}
+															>
+																<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+																	<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+																</svg>
+															</button>
+														</form>
+													</div>
+												{/if}
+											</div>
+											
+											<!-- Title Display/Edit -->
+											{#if isEditingTitle && selectedAnnouncementId === currentAnnouncement.id}
+												<form method="POST" action="?/updateAnnouncement" use:enhance>
+													<input type="hidden" name="id" value={currentAnnouncement.id} />
+													<div class="flex items-center gap-2 mb-4">
+														<input 
+															type="text" 
+															name="title" 
+															bind:value={tempTitle} 
+															class="flex-1 text-2xl font-bold text-green-800 bg-white border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-500"
+														/>
+														<button type="submit" class="text-green-600 hover:text-green-800 p-1" title="Save">
+															<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+																<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+															</svg>
+														</button>
+														<button type="button" on:click={cancelEdit} class="text-red-600 hover:text-red-800 p-1" title="Cancel">
+															<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+																<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+															</svg>
+														</button>
+													</div>
+												</form>
+											{:else}
+												<div class="flex items-center gap-2 mb-4">
+													<h2 class="text-2xl font-bold text-green-800 flex-1">{currentAnnouncement.title}</h2>
+													{#if isAdminLoggedIn}
+														<button 
+															on:click={() => startEditingTitle(currentAnnouncement.id)} 
+															class="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-100 transition-colors"
+															title="Edit title"
+														>
+															✏️
+														</button>
+													{/if}
+												</div>
+											{/if}
+
+											<!-- Date Display/Edit -->
+											{#if isEditingDate && selectedAnnouncementId === currentAnnouncement.id}
+												<form method="POST" action="?/updateAnnouncement" use:enhance>
+													<input type="hidden" name="id" value={currentAnnouncement.id} />
+													<div class="flex items-center gap-2 mb-3">
+														<span class="text-sm text-gray-600">📅</span>
+														<input 
+															type="text" 
+															name="display_date" 
+															bind:value={tempDate} 
+															class="text-sm text-gray-600 bg-white border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-500"
+														/>
+														<button type="submit" class="text-green-600 hover:text-green-800 p-1" title="Save">
+															<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+																<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+															</svg>
+														</button>
+														<button type="button" on:click={cancelEdit} class="text-red-600 hover:text-red-800 p-1" title="Cancel">
+															<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+																<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+															</svg>
+														</button>
+													</div>
+												</form>
+											{:else}
+												<div class="flex items-center gap-2 text-sm text-gray-600 mb-3">
+													<span>📅</span>
+													<span>{currentAnnouncement.display_date}</span>
+													{#if isAdminLoggedIn}
+														<button 
+															on:click={() => startEditingDate(currentAnnouncement.id)} 
+															class="text-blue-600 hover:text-blue-800 opacity-70 hover:opacity-100"
+															title="Edit date"
+														>
+															✏️
+														</button>
+													{/if}
+												</div>
+											{/if}
+
+											<!-- Category Badge -->
+											<div class="mb-4">
+												<span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+													{currentAnnouncement.category?.charAt(0).toUpperCase() + currentAnnouncement.category?.slice(1) || 'General'}
+												</span>
+											</div>
+
+											<!-- Content Display/Edit -->
+											{#if isEditingContent && selectedAnnouncementId === currentAnnouncement.id}
+												<form method="POST" action="?/updateAnnouncement" use:enhance>
+													<input type="hidden" name="id" value={currentAnnouncement.id} />
+													<div class="mb-4">
+														<textarea 
+															name="content" 
+															bind:value={tempContent} 
+															rows="10"
+															class="w-full text-gray-700 bg-white border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
+															placeholder="Enter announcement content..."
+														></textarea>
+														<div class="flex gap-2 mt-2">
+															<button type="submit" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors">
+																Save
+															</button>
+															<button type="button" on:click={cancelEdit} class="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 transition-colors">
+																Cancel
+															</button>
+														</div>
+													</div>
+												</form>
+											{:else}
+												<div class="text-gray-700 leading-relaxed prose prose-sm max-w-none">
+													{@html currentAnnouncement.content}
+													{#if isAdminLoggedIn}
+														<button 
+															on:click={() => startEditingContent(currentAnnouncement.id)} 
+															class="ml-2 text-blue-600 hover:text-blue-800 text-xs opacity-70 hover:opacity-100"
+															title="Edit content"
+														>
+															✏️
+														</button>
+													{/if}
+												</div>
+											{/if}
+
+											<!-- Display image if available -->
+											{#if currentAnnouncement.attachment}
+												<div class="mt-4">
+													<img 
+														src={currentAnnouncement.attachment} 
+														alt="Related to {currentAnnouncement.title}" 
+														class="max-w-full h-auto rounded-lg shadow-md border border-gray-200 hover:shadow-lg transition-shadow duration-200"
+														loading="lazy"
+													/>
+												</div>
+											{/if}
+										</div>
+
+										<!-- Navigation Controls -->
+										<div class="flex justify-center items-center gap-4 mt-6">
+											<button
+												on:click={goToPreviousAnnouncement}
+												disabled={!hasPreviousAnnouncement}
+												class="flex items-center justify-center w-12 h-12 bg-green-600 text-white rounded-full hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+											>
+												<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+												</svg>
+											</button>
+
+											<div class="flex items-center gap-2">
+												{#each announcements as _, index}
+													<button
+														on:click={() => goToAnnouncementIndex(index)}
+														class="w-3 h-3 rounded-full {index === currentAnnouncementIndex ? 'bg-green-600' : 'bg-gray-300'} hover:bg-green-500 transition-colors"
+													></button>
+												{/each}
+											</div>
+
+											<button
+												on:click={goToNextAnnouncement}
+												disabled={!hasNextAnnouncement}
+												class="flex items-center justify-center w-12 h-12 bg-green-600 text-white rounded-full hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+											>
+												<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+												</svg>
+											</button>
+										</div>
+									</div>
+								{/if}
+							</div>
 						</div>
-					{/if}
+					</div>
 				</div>
 			{/if}
-		</div>
-
-		{#if isLoading}
-			<p class="loading-message">Loading Announcements...</p>
-		{:else if errorMessage}
-			<div class="announcement-box">
-				<p class="error-message">{errorMessage}</p>
-			</div>
-		{:else if currentAnnouncement}
-			<!-- ... all your existing HTML for displaying the announcement ... -->
-			<div class="announcement-container">
-				<div class="announcement-box">
-					<!-- EDITABLE TITLE SECTION -->
-					<div class="editable-field">
-						{#if isEditingTitle}
-							<input type="text" bind:value={tempTitle} class="editable-input title-input" />
-							<button
-								class="field-btn save-btn"
-								on:click={async () => {
-									currentAnnouncement.title = tempTitle;
-									if (await saveChanges(currentAnnouncement)) {
-										isEditingTitle = false;
-									}
-								}}>Save</button
-							>
-							<button class="field-btn cancel-btn" on:click={() => (isEditingTitle = false)}
-								>Cancel</button
-							>
-						{:else}
-							<h2 class="font-serif font-bold">{currentAnnouncement.title}</h2>
-							<button
-								class="field-btn edit-btn"
-								on:click={() => {
-									tempTitle = currentAnnouncement.title;
-									isEditingTitle = true;
-								}}>Edit</button
-							>
-						{/if}
-					</div>
-
-					<!-- EDITABLE DATE SECTION -->
-					<div class="editable-field date-field">
-						{#if isEditingDate}
-							<span class="date-prefix">Published:</span>
-							<input type="date" bind:value={tempDate} class="editable-input date-input" />
-							<button
-								class="field-btn save-btn"
-								on:click={async () => {
-									currentAnnouncement.date = tempDate;
-									if (await saveChanges(currentAnnouncement)) {
-										isEditingDate = false;
-									}
-								}}>Save</button
-							>
-							<button class="field-btn cancel-btn" on:click={() => (isEditingDate = false)}
-								>Cancel</button
-							>
-						{:else}
-							<p class="announcement-date font-sans font-bold">
-								Published: {currentAnnouncement.date}
-							</p>
-							<button
-								class="field-btn edit-btn"
-								on:click={() => {
-									tempDate = currentAnnouncement.date;
-									isEditingDate = true;
-								}}>Edit</button
-							>
-						{/if}
-					</div>
-
-					<!-- EDITABLE CONTENT SECTION -->
-					<div class="editable-field content-field">
-						{#if isEditingContent}
-							<textarea bind:value={tempContent} class="editable-input content-input" />
-							<div class="content-buttons">
-								<button
-									class="field-btn save-btn"
-									on:click={async () => {
-										currentAnnouncement.content = tempContent;
-										if (await saveChanges(currentAnnouncement)) {
-											isEditingContent = false;
-										}
-									}}>Save</button
-								>
-								<button class="field-btn cancel-btn" on:click={() => (isEditingContent = false)}
-									>Cancel</button
-								>
-							</div>
-						{:else}
-							<div class="announcement-content font-sans">
-								{@html currentAnnouncement.content}
-							</div>
-							<button
-								class="field-btn edit-btn"
-								on:click={() => {
-									tempContent = currentAnnouncement.content;
-									isEditingContent = true;
-								}}>Put Content</button
-							>
-						{/if}
-					</div>
-				</div>
-				<!-- Main Navigation -->
-				<div class="announcement-navigation">
-					<button on:click={goToPrevious} disabled={!hasPrevious}>
-						{'<'}
-					</button>
-
-					<button on:click={goToNext} disabled={!hasNext}>
-						{'>'}
-					</button>
-				</div>
-			</div>
-		{:else}
-			<div class="announcement-box" style="display: flex; flex-direction: column; align-items: center;">
-				<p class="no-announcement-message">No announcements available.</p>
-				<button on:click={handleNewAnnouncement} class="action-btn add-btn" style="margin-top: 10px;">
-					Create First Announcement
-				</button>
-			</div>
-		{/if}
-	</main>
+		</main>
+	</div>
 </div>
 
-<footer
-	class="bg-green-900/80 text-white py-3 md:py-4 backdrop-blur-md border-t-0 border-green-700/30 mt-0"
->
-	<!-- ... footer content ... -->
-	<div class="container mx-auto text-center text-xs md:text-sm">
-		<p>© {new Date().getFullYear()} New Cabalan National High School. All rights reserved.</p>
-		<p class="mt-1 md:mt-2 text-yellow-300/80 text-[10px] md:text-xs">
-			Empowering students through education since 1979
-		</p>
+<!-- New Announcement Modal -->
+{#if showNewAnnouncementModal}
+	<div class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 pt-20 z-50" 
+		on:click={(e) => e.target === e.currentTarget && closeNewAnnouncementModal()}>
+		<div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto" 
+			on:click|stopPropagation>
+			<div class="bg-gradient-to-r from-green-600 to-green-700 text-white p-6 rounded-t-2xl">
+				<div class="flex justify-between items-center">
+					<h3 class="text-xl font-semibold">Create New Announcement</h3>
+					<button on:click={closeNewAnnouncementModal} class="text-white hover:text-gray-200">
+						<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+			</div>
+			
+			<!-- Modal Body -->
+			<form method="POST" action="?/createAnnouncement" enctype="multipart/form-data" use:enhance={() => {
+				return async ({ update }) => {
+					await update();
+					closeNewAnnouncementModal();
+				};
+			}}>
+				<div class="p-6 space-y-4">
+					<div>
+						<label for="title" class="block text-sm font-medium text-gray-700 mb-2">Title</label>
+						<input
+							id="title"
+							name="title"
+							type="text"
+							bind:value={newAnnouncement.title}
+							required
+							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+							placeholder="Enter announcement title"
+						/>
+					</div>
+					
+					<div>
+						<label for="display_date" class="block text-sm font-medium text-gray-700 mb-2">Display Date</label>
+						<input
+							id="display_date"
+							name="display_date"
+							type="text"
+							bind:value={newAnnouncement.display_date}
+							required
+							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+							placeholder="e.g., December 25th, 2024"
+						/>
+					</div>
+					
+					<div>
+						<label for="content" class="block text-sm font-medium text-gray-700 mb-2">Content</label>
+						<textarea
+							id="content"
+							name="content"
+							bind:value={newAnnouncement.content}
+							rows="6"
+							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+							placeholder="Enter announcement content"
+						></textarea>
+					</div>
+					
+					<div>
+						<label for="category" class="block text-sm font-medium text-gray-700 mb-2">Category</label>
+						<select
+							id="category"
+							name="category"
+							bind:value={newAnnouncement.category}
+							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+						>
+							<option value="general">General</option>
+							<option value="academic">Academic</option>
+							<option value="event">Event</option>
+							<option value="maintenance">Maintenance</option>
+						</select>
+					</div>
+
+					<div>
+						<label for="image" class="block text-sm font-medium text-gray-700 mb-2">Image (Optional)</label>
+						<input
+							id="image"
+							name="image"
+							type="file"
+							accept="image/*"
+							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+						/>
+					</div>
+				</div>
+				
+				<div class="p-6 pt-0 flex gap-3 justify-end">
+					<button
+						type="button"
+						on:click={closeNewAnnouncementModal}
+						class="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+					>
+						Cancel
+					</button>
+					<button
+						type="submit"
+						class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+					>
+						Create Announcement
+					</button>
+				</div>
+			</form>
+		</div>
 	</div>
-</footer>
+{/if}
 
-<!-- All your existing styles remain the same -->
 <style>
-	/* ... all your existing styles ... */
-	/* --- NEW UX STYLES --- */
-	.loading-message,
-	.error-message {
-		color: white;
-		background-color: rgba(0, 0, 0, 0.5);
-		padding: 20px;
-		border-radius: 8px;
-		font-size: 1.2em;
-		text-align: center;
-	}
-	.error-message {
-		background-color: #f44336; /* Red background for errors */
-		color: white;
-		font-weight: bold;
-	}
-	/* --- STYLES FOR PER-FIELD EDITING --- */
-	.editable-field {
-		display: flex;
-		align-items: center;
-		gap: 15px;
-		margin-bottom: 20px;
-		width: 100%;
-	}
-	.date-field {
-		border-bottom: 1px solid #eee;
-		padding-bottom: 20px;
-	}
-	.content-field {
-		flex-direction: column;
-		align-items: flex-start;
-	}
-	.editable-input {
-		border: 1px solid #ccc;
-		padding: 8px;
-		border-radius: 4px;
-		font-size: 1em;
-		flex-grow: 1;
-	}
-	.title-input {
-		font-size: 1.5em;
-		font-weight: bold;
-	}
-	.date-input {
-		flex-grow: 0;
-	}
-	.content-input {
-		width: 100%;
-		height: 300px;
-		resize: vertical;
-	}
-	.field-btn {
-		padding: 6px 12px;
-		border-radius: 5px;
-		border: 1px solid transparent;
-		cursor: pointer;
-		font-size: 0.8em;
-		font-weight: bold;
-		white-space: nowrap;
-	}
-	.edit-btn {
-		background-color: #e0e0e0;
-		border-color: #ccc;
-		color: #333;
-	}
-	.save-btn {
-		background-color: #4caf50;
-		color: white;
-	}
-	.cancel-btn {
-		background-color: #f44336;
-		color: white;
-	}
-	.content-buttons {
-		margin-top: 10px;
-		display: flex;
-		gap: 10px;
-	}
-	.date-prefix {
-		font-weight: bold;
-	}
-	h2 {
-		margin: 0;
-		flex-grow: 1;
+	/* Use Tailwind styles for most styling, with custom overrides here if needed */
+	:global(.prose) {
+		max-width: none !important;
 	}
 
-	/* --- ACTION BUTTONS & POPUP MENU STYLES --- */
-	.action-buttons-container {
-		position: relative;
-		z-index: 10;
-		display: flex;
-		gap: 5px;
-		justify-content: flex-end;
-	}
-	.action-btn {
-		border-radius: 8px;
-		padding: 10px 20px;
-		font-weight: bold;
-		color: white;
-		border: none;
-		cursor: pointer;
-		text-align: center;
-	}
-	.add-btn {
-		background-color: #4caf50;
-	}
-	.delete-btn {
-		background-color: #f44336;
-	}
-	.manage-btn {
-		background-color: #9f9a00; 
-	}
-	.manage-menu {
-		position: absolute;
-		top: 100%;
-		right: 0;
-		background-color: white;
-		border: 1px solid #ccc;
-		border-radius: 5px;
-		display: flex;
-		flex-direction: column;
-		z-index: 20;
-		width: 120px;
-		padding: 5px;
-		box-sizing: border-box;
-	}
-	.manage-menu button {
-		width: 100%;
-		border: none;
-		margin: 0;
-	}
-	.manage-menu button:not(:last-child) {
-		margin-bottom: 5px;
-	}
-	.manage-menu .add-btn:hover {
-		background-color: #45a049; /* Darker green */
-	}
-	.manage-menu .delete-btn:hover {
-		background-color: #e53935; /* Darker red */
-	}
-	.no-announcement-message {
-		color: grey;
-		font-weight: 500;
+	:global(.prose h1) {
+		color: #1f2937;
+		margin-bottom: 1rem;
 	}
 
-	/* --- PREVIOUS/NEXT NAVIGATION BUTTONS --- */
-	.announcement-navigation button {
-		background-color: #326b09;
-		border: 2px solid black;
-		border-radius: 8px;
-		width: 60px;
-		height: 60px;
-		display: flex;
-		justify-content: center;
-		align-items: center;
-		cursor: pointer;
-		transition: background-color 0.3s;
-		color: white;
-	}
-	.announcement-navigation button:disabled {
-		background-color: #6b6109;
-		border-color: #050505;
-		cursor: not-allowed;
-		opacity: 0.5;
-	}
-	.announcement-navigation button:hover:not(:disabled) {
-		background-color: #148a0c;
+	:global(.prose h2) {
+		color: #1f2937;
+		margin-bottom: 0.75rem;
 	}
 
-	/* --- GENERAL LAYOUT STYLES (Unchanged) --- */
-	:global(body) {
-		margin: 0;
-		background-color: #096b68;
+	:global(.prose p) {
+		margin-bottom: 1rem;
+		line-height: 1.6;
 	}
-	.page-container {
-		display: flex;
-		flex-direction: column;
-		min-height: 100vh;
-	}
-	main {
-		flex: 1;
+
+	/* Custom styles for backward compatibility */
+	.bg-cover {
 		background-size: cover;
+	}
+
+	.bg-center {
 		background-position: center;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		padding: 10px;
-	}
-	.school-logo {
-		width: 220px;
-		height: 220px;
-		object-fit: contain;
-		margin-bottom: 10px;
-	}
-	.title-container {
-		text-align: center;
-		margin-bottom: 15px;
-	}
-	.announcement-title {
-		color: rgb(190, 166, 4);
-		font-size: 4.5em;
-		text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
-	}
-	.announcement-container {
-		position: relative;
-		width: 90%;
-		max-width: 1050px;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-	}
-	.announcement-box {
-		background-color: #e6e6e6;
-		border: 20px solid #096b68;
-		border-radius: 15px;
-		width: 75%;
-		padding: 1.5rem 2rem;
-		box-sizing: border-box;
-		position: relative;
-	}
-	.announcement-date {
-		margin: 0;
-		flex-grow: 1;
-	}
-	.announcement-content {
-		width: 100%;
-		text-align: justify;
-	}
-
-	.announcement-navigation {
-		display: flex;
-		justify-content: center;
-		gap: 20px;
-		width: 100%;
-		margin-top: 20px;
-		padding: 0 1rem;
-		box-sizing: border-box;
-		position: relative;
-	}
-	/* --- RESPONSIVE DESIGN --- */
-	@media (max-width: 768px) {
-		.announcement-title {
-			font-size: 3em;
-		}
-		.announcement-box {
-			width: 90%;
-			padding: 1rem;
-		}
-		.editable-field {
-			flex-direction: column;
-			align-items: stretch;
-			gap: 10px;
-		}
-		.editable-field h2,
-		.editable-field p {
-			text-align: center;
-		}
-		.editable-input {
-			width: 100%;
-		}
-		.field-btn {
-			width: 100%;
-			box-sizing: border-box;
-		}
-		.content-buttons {
-			flex-direction: column;
-		}
-		.announcement-navigation button {
-			width: 50px;
-			height: 50px;
-		}
-	}
-
-	@media (max-width: 480px) {
-		.school-logo {
-			width: 150px;
-			height: 150px;
-		}
-		.announcement-title {
-			font-size: 2em;
-		}
-		.announcement-box {
-			width: 95%;
-			border-width: 10px;
-		}
-		.title-input {
-			font-size: 1.2em;
-		}
-		.content-input {
-			height: 200px;
-		}
-		.announcement-navigation button {
-			width: 45px;
-			height: 45px;
-		}
 	}
 </style>

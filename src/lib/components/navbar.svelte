@@ -2,7 +2,7 @@
   import { slide } from 'svelte/transition';
   import { onMount, onDestroy } from 'svelte';
   import { browser } from '$app/environment';
-  import AdminLoginModal from './AdminLoginModal.svelte';
+  import SimpleAdminLogin from './SimpleAdminLogin.svelte';
 
   // Props
   export let currentPage = 'FACULTY';
@@ -102,7 +102,7 @@
   });
 </script>
 
-<AdminLoginModal bind:showModal={showLoginModal} />
+<SimpleAdminLogin bind:open={showLoginModal} />
 
 <header class="sticky top-0 w-full bg-green-900/80 p-3 shadow-lg backdrop-blur-md border-b border-green-700/30 z-20">
   <div class="container mx-auto flex items-center justify-between">

@@ -1,5 +1,5 @@
 import { db } from '$lib/server/db/index.js';
-import { faculty } from '$lib/server/db/schema.js';
+import { faculty } from '$lib/server/db/index.js';
 import { json } from '@sveltejs/kit';
 import { eq, desc } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
