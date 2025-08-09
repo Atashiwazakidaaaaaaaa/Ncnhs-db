@@ -16,14 +16,14 @@
     image_url: string | null;
   }
 
-  let faculty = $derived(data.faculty);
+  let faculty = $derived(data.faculty as Faculty[]);
   let schoolYearText = $derived(data.schoolYear || "School Year 2024-2025");
   
   let visible = $state(false);
   let searchQuery = $state("");
   let selectedDepartment = $state("All");
-  let viewMode = $state("tree"); // "grid" or "tree"
-  let currentPage = $state(1); // 1 for full hierarchy, 2 for departmental view
+  let viewMode = $state("tree");
+  let currentPage = $state(1);
   
   // Admin modal state
   let showAdminModal = $state(false);
@@ -32,193 +32,113 @@
   let loginError = $state("");
   let isAdminLoggedIn = $state(data.loggedIn);
   
-  // Debug admin status
-  // $: console.log('Faculty page - isAdminLoggedIn:', isAdminLoggedIn);
-  
   // Faculty editing state
   let showEditModal = $state(false);
   let editingFaculty: Faculty | null = $state(null);
   let isCreatingNew = $state(false);
   let editForm = $state({
-    name: "",
-    role: "",
-    department: "",
-    email: "",
-    number: "",
-    image_url: ""
+    name: "", role: "", department: "",
+    email: "", number: "", image_url: ""
   });
 
+  // --- THE FIX IS HERE: Converted to $state runes ---
   let isUpdating = $state(false);
   let uploadingImage = $state(false);
   let imageFile: File | null = $state(null);
   
-  // Cookie checking for admin status
-  let cookieCheckInterval: NodeJS.Timeout | null = null;
-  
-  // School year text state
   let showSchoolYearEdit = $state(false);
   let editingSchoolYear = $state("");
+  // --- END OF FIX ---
   
-  // Window width for responsive design
-  let windowWidth = $state(1024); // Default to desktop width
+  let cookieCheckInterval: NodeJS.Timeout | null = null;
   
-  // Departments array
+  let windowWidth = $state(1024);
+
+  const imageBaseUrl = '/uploads/faculty/';
   const departments = [
-    "All",
-    "Administration",
-    "Mathematics",
-    "Science",
-    "English",
-    "Filipino",
-    "Social Studies",
-    "MAPEH",
-    "TLE",
-    "Maintenance"
+    "All", "Administration", "Mathematics", "Science", "English", "Filipino",
+    "Social Studies", "MAPEH", "TLE", "Maintenance"
   ];
   
-  // Centralized department color legend
   const deptColors: Record<string, string> = {
-    Administration: "#FFFF00", // Yellow
-    Mathematics: "#3B82F6",    // Blue
-    Science: "#008000",        // Green
-    English: "#FF0000",        // Red
-    Filipino: "#964B00",       // Brown
-    "Social Studies": "#10B981", // Teal/Green
-    MAPEH: "#B200ED",          // Purple
-    TLE: "#000000",            // Black
-    Maintenance: "#FF6600"      // Orange
+    Administration: "#FFFF00", Mathematics: "#3B82F6", Science: "#008000",
+    English: "#FF0000", Filipino: "#964B00", "Social Studies": "#10B981",
+    MAPEH: "#B200ED", TLE: "#000000", Maintenance: "#FF6600"
   };
   
   function colorFor(dept?: string) {
-    if (!dept) return "#6B7280"; // gray fallback
+    if (!dept) return "#6B7280";
     return deptColors[dept] || "#6B7280";
   }
   
-  // Helper function to get the principal
-  function getPrincipal() {
-    return filteredFaculty.find((f: Faculty) => f.role === "Principal");
-  }
-  
-  // Helper function to get the assistant principal
-  function getAssistantPrincipal() {
-    return filteredFaculty.find((f: Faculty) => f.role === "Assistant Principal");
-  }
-  
-  // Helper function to get master teachers
-  function getMasterTeachers() {
-    return filteredFaculty.filter((f: Faculty) => f.role === "Master Teacher");
-  }
-  
-  // Helper function to get regular teachers by department
-  function getTeachersByDepartment(department: string) {
-    return filteredFaculty.filter((f: Faculty) =>
-      f.department === department &&
-      f.role !== "Master Teacher" &&
-      f.role !== "Principal" &&
-      f.role !== "Assistant Principal"
-    );
-  }
-  
-  // Filter faculty based on search and department selection
   let filteredFaculty = $derived(faculty.filter((f: Faculty) => {
-    const matchesSearch = f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        f.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        f.department.toLowerCase().includes(searchQuery.toLowerCase());
+    const searchLower = searchQuery.toLowerCase();
+    const matchesSearch = f.name.toLowerCase().includes(searchLower) ||
+                        f.role.toLowerCase().includes(searchLower) ||
+                        f.department.toLowerCase().includes(searchLower);
     const matchesDepartment = selectedDepartment === "All" || f.department === selectedDepartment;
     return matchesSearch && matchesDepartment;
   }));
   
-  // Function to check admin login status from cookies
+  function getPrincipal() { return filteredFaculty.find((f) => f.role === "Principal"); }
+  function getAssistantPrincipal() { return filteredFaculty.find((f) => f.role === "Assistant Principal"); }
+  function getMasterTeachers() { return filteredFaculty.filter((f) => f.role === "Master Teacher"); }
+  function getTeachersByDepartment(department: string) {
+    return filteredFaculty.filter((f) =>
+      f.department === department && !["Master Teacher", "Principal", "Assistant Principal"].includes(f.role)
+    );
+  }
+  
   function checkAdminStatus() {
     if (browser) {
-      const authCookie = document.cookie
-        .split('; ')
-        .find(row => row.startsWith('auth='));
-      
+      const authCookie = document.cookie.split('; ').find(row => row.startsWith('auth='));
       const newAdminStatus = !!authCookie;
       if (newAdminStatus !== isAdminLoggedIn) {
         isAdminLoggedIn = newAdminStatus;
-        console.log('Admin status changed:', isAdminLoggedIn);
       }
     }
   }
   
-  // Faculty management functions
-  function openEditModal(faculty?: Faculty) {
-    if (faculty) {
-      editingFaculty = faculty;
+  function openEditModal(facultyMember?: Faculty) {
+    if (facultyMember) {
+      editingFaculty = facultyMember;
       editForm = {
-        name: faculty.name,
-        role: faculty.role,
-        department: faculty.department,
-        email: faculty.email || "",
-        number: faculty.number || "",
-        image_url: faculty.image_url || ""
+        name: facultyMember.name, role: facultyMember.role, department: facultyMember.department,
+        email: facultyMember.email || "", number: facultyMember.number || "", image_url: facultyMember.image_url || ""
       };
       isCreatingNew = false;
     } else {
       editingFaculty = null;
-      editForm = {
-        name: "",
-        role: "",
-        department: "",
-        email: "",
-        number: "",
-        image_url: ""
-      };
+      editForm = { name: "", role: "", department: "", email: "", number: "", image_url: "" };
       isCreatingNew = true;
     }
     showEditModal = true;
   }
   
   function closeEditModal() {
-    showEditModal = false;
-    editingFaculty = null;
-    isCreatingNew = false;
-    imageFile = null;
-    uploadingImage = false;
+    showEditModal = false; editingFaculty = null; isCreatingNew = false; imageFile = null; uploadingImage = false;
   }
   
   async function handleImageUpload(event: Event) {
-    const target = event.target as HTMLInputElement;
-    const file = target.files?.[0];
-    
+    const file = (event.target as HTMLInputElement).files?.[0];
     if (!file) return;
-    
-    // Validate file size (5MB limit)
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Image file size must be less than 5MB');
-      return;
-    }
-    
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      alert('Please select a valid image file');
-      return;
-    }
+    if (file.size > 5 * 1024 * 1024) { alert('Image must be less than 5MB'); return; }
+    if (!file.type.startsWith('image/')) { alert('Please select a valid image file'); return; }
     
     uploadingImage = true;
     imageFile = file;
-    
     try {
       const formData = new FormData();
       formData.append('image', file);
-      
-  const response = await fetch('http://localhost/upload_faculty_image.php', {
-        method: 'POST',
-        body: formData
-      });
-      
+      const response = await fetch('/api/faculty/upload', { method: 'POST', body: formData });
       const result = await response.json();
-      
-      if (result.success) {
-        editForm.image_url = result.image_url;
+      if (response.ok) {
+        editForm.image_url = result.imageUrl;
         showSuccessNotification('Image uploaded successfully!');
       } else {
         alert('Error uploading image: ' + (result.error || 'Unknown error'));
       }
     } catch (error) {
-      console.error('Error uploading image:', error);
       alert('Error uploading image. Please try again.');
     } finally {
       uploadingImage = false;
@@ -230,53 +150,28 @@
       alert('Please fill in all required fields');
       return;
     }
-
     isUpdating = true;
-    
     try {
-  const url = 'http://localhost/manage_faculty.php';
+      const url = isCreatingNew ? '/api/faculty' : `/api/faculty/${editingFaculty?.id}`;
       const method = isCreatingNew ? 'POST' : 'PUT';
-      const body = isCreatingNew ? editForm : { ...editForm, id: editingFaculty?.id };
-      
-      console.log('Saving faculty with method:', method);
-      console.log('Request body:', JSON.stringify(body, null, 2));
-      console.log('URL:', url);
       
       const response = await fetch(url, {
         method,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm)
       });
       
-      console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
+      const result = await response.json();
       
-      const responseText = await response.text();
-      console.log('Raw response text:', responseText);
-      
-      let result;
-      try {
-        result = JSON.parse(responseText);
-        console.log('Response result:', result);
-      } catch (parseError) {
-        console.error('Error parsing JSON response:', parseError);
-        console.log('Response was not valid JSON:', responseText);
-        throw new Error('Invalid JSON response from server: ' + responseText);
-      }
-      
-      if (result.success) {
+      if (response.ok) {
         closeEditModal();
-        showSuccessNotification(result.message);
-        // Refresh the page to show updated data
-        invalidateAll();
+        showSuccessNotification(`Faculty ${isCreatingNew ? 'added' : 'updated'} successfully!`);
+        await invalidateAll();
       } else {
-        alert('Error: ' + (result.error || 'Unknown error occurred'));
+        throw new Error(result.error || `Server responded with status ${response.status}`);
       }
     } catch (error) {
       console.error('Error saving faculty:', error);
-      console.error('Error details:', error.message);
       alert('Error saving faculty member. Please try again.');
     } finally {
       isUpdating = false;
@@ -286,24 +181,17 @@
   async function deleteFaculty(id: number) {
     if (confirm('Are you sure you want to delete this faculty member?')) {
       try {
-  const response = await fetch('http://localhost/manage_faculty.php', {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ id })
+        const response = await fetch(`/api/faculty/${id}`, {
+          method: 'DELETE'
         });
-        
         const result = await response.json();
-        
-        if (result.success) {
-          // Instantly reload the page
-          location.reload();
+        if (response.ok) {
+          showSuccessNotification('Faculty member deleted successfully!');
+          await invalidateAll();
         } else {
           alert('Error: ' + (result.error || 'Unknown error occurred'));
         }
       } catch (error) {
-        console.error('Error deleting faculty:', error);
         alert('Error deleting faculty member. Please try again.');
       }
     }
@@ -317,118 +205,59 @@
     }
   }
 
-  // PersonNode event handlers
   function handleEditFaculty(event: CustomEvent) {
     const facultyData = event.detail;
-    console.log('Edit faculty event:', facultyData);
-    // Convert the faculty data to match the Faculty interface
-    const faculty = {
+    const facultyMember: Faculty = {
       id: typeof facultyData.id === 'string' ? parseInt(facultyData.id) : facultyData.id,
-      name: facultyData.name,
-      role: facultyData.role,
-      department: facultyData.department,
-      email: facultyData.email,
-      number: facultyData.number,
-      image_url: facultyData.imageUrl || facultyData.image_url
+      name: facultyData.name, role: facultyData.role, department: facultyData.department,
+      email: facultyData.email, number: facultyData.number, image_url: facultyData.imageUrl || facultyData.image_url
     };
-    openEditModal(faculty);
+    openEditModal(facultyMember);
   }
 
   function handleDeleteFaculty(event: CustomEvent) {
     const facultyData = event.detail;
-    console.log('Delete faculty event:', facultyData);
     if (confirm(`Are you sure you want to delete ${facultyData.name}?`)) {
-      // Convert id to number if it's a string
       const facultyId = typeof facultyData.id === 'string' ? parseInt(facultyData.id) : facultyData.id;
       deleteFaculty(facultyId);
     }
   }
 
-  // School year editing functions
-  function startEditingSchoolYear() {
-    editingSchoolYear = schoolYearText;
-    showSchoolYearEdit = true;
-  }
+  function startEditingSchoolYear() { editingSchoolYear = schoolYearText; showSchoolYearEdit = true; }
+  function saveSchoolYear() { if (editingSchoolYear.trim()) { showSchoolYearEdit = false; showSuccessNotification('School year updated!'); } }
+  function cancelSchoolYearEdit() { showSchoolYearEdit = false; editingSchoolYear = ""; }
   
-  function saveSchoolYear() {
-    if (editingSchoolYear.trim()) {
-      // Implementation would save to backend
-      showSchoolYearEdit = false;
-      showSuccessNotification('School year updated successfully!');
-    }
-  }
+  function startCookieCheck() { if (browser && !cookieCheckInterval) cookieCheckInterval = setInterval(checkAdminStatus, 500); }
+  function stopCookieCheck() { if (cookieCheckInterval) { clearInterval(cookieCheckInterval); cookieCheckInterval = null; } }
   
-  function cancelSchoolYearEdit() {
-    showSchoolYearEdit = false;
-    editingSchoolYear = "";
-  }
-  
-  // Start checking for cookie changes periodically
-  function startCookieCheck() {
-    if (browser && !cookieCheckInterval) {
-      cookieCheckInterval = setInterval(checkAdminStatus, 500); // Check every 500ms
-    }
-  }
-  
-  // Stop checking for cookie changes
-  function stopCookieCheck() {
-    if (cookieCheckInterval) {
-      clearInterval(cookieCheckInterval);
-      cookieCheckInterval = null;
-    }
-  }
-  
-  // Notification functions
   let notificationMessage = $state('');
   let notificationType: 'success' | 'error' = $state('success');
   let showNotification = $state(false);
   
-  // Mobile profile popup state
   let showMobileProfileModal = $state(false);
-  let selectedProfile: {
-    name: string;
-    role: string;
-    email: string;
-    number: string;
-    departmentColor: string;
-  } | null = $state(null);
+  let selectedProfile: { name: string; role: string; email: string; number: string; departmentColor: string; } | null = $state(null);
   
   function handleProfileClick(event: CustomEvent) {
-    // Only show modal on mobile devices
     if (windowWidth < 768) {
       selectedProfile = event.detail;
       showMobileProfileModal = true;
     }
   }
   
-  function closeMobileProfileModal() {
-    showMobileProfileModal = false;
-    selectedProfile = null;
-  }
+  function closeMobileProfileModal() { showMobileProfileModal = false; selectedProfile = null; }
   
   function showSuccessNotification(message: string) {
-    notificationMessage = message;
-    notificationType = 'success';
-    showNotification = true;
+    notificationMessage = message; notificationType = 'success'; showNotification = true;
     setTimeout(() => showNotification = false, 3000);
   }
   
   function showErrorNotification(message: string) {
-    notificationMessage = message;
-    notificationType = 'error';
-    showNotification = true;
+    notificationMessage = message; notificationType = 'error'; showNotification = true;
     setTimeout(() => showNotification = false, 5000);
   }
   
-  onMount(() => {
-    visible = true;
-    checkAdminStatus();
-    startCookieCheck();
-  });
-  
-  onDestroy(() => {
-    stopCookieCheck();
-  });
+  onMount(() => { visible = true; checkAdminStatus(); startCookieCheck(); });
+  onDestroy(() => { stopCookieCheck(); });
   
 </script>
 
@@ -444,31 +273,20 @@
     <main class="flex flex-grow flex-col items-center">
       <!-- School Logo -->
       {#if visible}
-<div class="flex flex-col items-center justify-center text-center gap-2 mt-4 md:mt-6 mb-4" in:fade={{ duration: 1000 }}>
+<div class="flex flex-col items-center justify-center text-center gap-2 mt-6 mb-4" in:fade={{ duration: 1000 }}>
   <!-- Logo -->
   <div class="flex justify-center">
-  <img src="/logo.png" alt="School Logo" class="logo" />
-<style>
-  .logo {
-    width: 200px;
-    height: auto;
-    margin-bottom: 20px;
-    margin-top: -10px;
-    margin-left: auto;
-    margin-right: auto;
-    display: block;
-  }
-</style>
+    <img src="/logo.png" alt="School Logo" class="drop-shadow-lg" style="width: 200px; height: auto;" />
   </div>
 </div>
 {/if}
       
       <!-- Modern Faculty Container -->
       {#if visible}
-      <div class="w-full max-w-6xl mx-auto mb-8 flex flex-col px-4 sm:px-6 lg:px-8" in:fly={{ y: 100, duration: 800, delay: 600 }}>
+      <div class="w-full max-w-6xl mx-auto mb-8 flex flex-col" in:fly={{ y: 100, duration: 800, delay: 600 }}>
         <!-- Header Section -->
-        <div class="rounded-t-2xl bg-gradient-to-r from-green-600 to-green-700 text-white py-3 md:py-4 shadow-lg">
-          <div class="flex justify-between items-center px-3 md:px-6">
+        <div class="rounded-t-2xl bg-gradient-to-r from-green-600 to-green-700 text-white py-4 shadow-lg">
+          <div class="flex justify-between items-center px-6">
             <!-- Left side: Empty spacer -->
             <div class="flex-1"></div>
             
@@ -478,7 +296,7 @@
                 <input
                   type="text"
                   bind:value={editingSchoolYear}
-                  class="text-lg md:text-xl lg:text-2xl xl:text-3xl font-bold bg-white/20 text-white placeholder-white/70 border border-white/30 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-white/50"
+                  class="text-xl md:text-2xl lg:text-3xl font-bold bg-white/20 text-white placeholder-white/70 border border-white/30 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-white/50"
                   placeholder="Enter school year"
                   on:keydown={(e) => {
                     if (e.key === 'Enter') saveSchoolYear();
@@ -507,11 +325,11 @@
                   </svg>
                 </button>
               {:else}
-                <h2 class="text-lg md:text-xl lg:text-2xl xl:text-3xl font-bold pl-3 md:pl-3 pr-2 md:pr-4">{schoolYearText.toUpperCase()}</h2>
+                <h2 class="text-xl md:text-2xl lg:text-3xl font-bold md:pl-3 pr-4 md:pr-0">{schoolYearText.toUpperCase()}</h2>
                 {#if isAdminLoggedIn}
                   <button
                     on:click={startEditingSchoolYear}
-                    class="text-white hover:text-yellow-200 transition-colors ml-1 md:ml-2"
+                    class="text-white hover:text-yellow-200 transition-colors ml-2"
                     title="Edit school year"
                     aria-label="Edit school year"
                   >
@@ -524,25 +342,24 @@
             </div>
             
             <!-- Right side: Admin controls -->
-            <div class="flex-1 flex justify-end ml-2 sm:ml-4">
+            <div class="flex-1 flex justify-end ml-2 sm:ml-4 md:ml-0">
               {#if isAdminLoggedIn}
-                <div class="flex items-center gap-1 md:gap-2">
+                <div class="flex items-center gap-2">
                   {#if isUpdating}
                     <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" title="Syncing data..."></div>
                   {/if}
                   <button
                     on:click={() => openEditModal()}
-                    class="bg-white/20 hover:bg-white/30 text-white px-2 py-1 md:px-3 md:py-1 rounded-lg text-xs md:text-sm font-medium transition-colors flex items-center gap-1"
+                    class="bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 md:h-4 md:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                     </svg>
-                    <span class="hidden sm:inline">Add Faculty</span>
-                    <span class="sm:hidden">Add</span>
+                    Add Faculty
                   </button>
                   <button 
                     on:click={handleAdminLogout}
-                    class="bg-red-600 hover:bg-red-700 text-white px-2 py-1 md:px-3 md:py-1 rounded-lg text-xs md:text-sm font-medium transition-colors"
+                    class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-lg text-sm font-medium transition-colors"
                   >
                     Logout
                   </button>
@@ -553,27 +370,27 @@
         </div>
         
         <!-- Main Content Box with Gradient Border -->
-        <div class="bg-gradient-to-r from-green-600 to-green-700 px-2 md:px-3 pt-2 md:pt-3 pb-3 md:pb-5 shadow-2xl min-h-[70vh] rounded-b-xl">
-          <div class="bg-white p-3 md:p-4 lg:p-6 rounded-xl h-full flex flex-col">
+        <div class="bg-gradient-to-r from-green-600 to-green-700 px-3 pt-3 pb-5 shadow-2xl min-h-[70vh] rounded-b-xl">
+          <div class="bg-white p-4 md:p-6 rounded-xl h-full flex flex-col">
             
             <!-- Faculty Header with Page Indicator -->
-            <div class="flex justify-between items-center mb-4 md:mb-6 flex-shrink-0">
-              <div class="w-8 md:w-16"></div> <!-- Spacer for balance -->
-              <h3 class="text-lg md:text-xl lg:text-2xl font-semibold text-green-800 text-center">School Faculty</h3>
-              <div class="text-xs md:text-sm text-green-600 font-medium">
+            <div class="flex justify-between items-center mb-6 flex-shrink-0">
+              <div class="w-16"></div> <!-- Spacer for balance -->
+              <h3 class="text-lg md:text-xl lg:text-2xl font-semibold text-green-800">School Faculty</h3>
+              <div class="text-sm text-green-600 font-medium">
                 Page {currentPage} of 2
               </div>
             </div>
             
             <!-- Scrollable Content Area -->
-            <div class="flex-1 overflow-y-auto pr-1 md:pr-2">
+            <div class="flex-1 overflow-y-auto pr-2">
         
         <!-- Search and Filter Controls -->
-        <div class="mb-2 md:mb-3 flex flex-col md:flex-row gap-2 md:gap-3 justify-between items-center bg-gray-100 rounded-2xl p-3 md:p-4 shadow-md">
+        <div class="mb-2 md:mb-3 flex flex-col md:flex-row gap-3 md:gap-4 justify-between items-center bg-gray-100 rounded-2xl p-4 shadow-md">
           <!-- Search Box -->
           <div class="relative w-full md:w-1/4">
             <div class="flex items-center border border-green-300 rounded-lg bg-white focus-within:ring-1 focus-within:ring-green-500 focus-within:border-green-500 overflow-hidden">
-              <div class="pl-2 md:pl-3 pointer-events-none">
+              <div class="pl-3 pointer-events-none">
                 <svg class="w-4 h-4 text-green-800" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20">
                   <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19 19-4-4m0-7A7 7 0 1 1 1 8a7 7 0 0 1 14 0Z"/>
                 </svg>
@@ -587,12 +404,12 @@
             </div>
           </div>
           
-          <div class="flex gap-2 md:gap-3 w-full md:w-auto">
+          <div class="flex gap-2 md:gap-3">
             <!-- Department Filter -->
-            <div class="flex-1 md:flex-none">
+            <div>
               <select 
                 bind:value={selectedDepartment}
-                class="w-full md:w-auto bg-white border border-green-300 text-green-900 text-sm rounded-lg focus:ring-green-500 focus:border-green-500 p-2 md:p-3"
+                class="bg-white border border-green-300 text-green-900 text-sm rounded-lg focus:ring-green-500 focus:border-green-500 p-2 md:p-3"
               >
                 {#each departments as department}
                   <option value={department}>{department}</option>
@@ -1035,28 +852,26 @@
         </div>
         
         <!-- Navigation Buttons -->
-        <div class="flex justify-center mt-4 md:mt-6 gap-2 md:gap-4">
+        <div class="flex justify-center mt-6 gap-4">
           <button 
-            class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-2 md:px-6 md:py-3 rounded-full shadow-lg transition-colors flex items-center gap-1 md:gap-2 text-sm md:text-base"
+            class="bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-3 rounded-full shadow-lg transition-colors flex items-center gap-2"
             on:click={() => currentPage = 1}
             disabled={currentPage === 1}
             class:opacity-50={currentPage === 1}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
             </svg>
-            <span class="hidden sm:inline">Leadership</span>
-            <span class="sm:hidden">Lead</span>
+            Leadership
           </button>
           <button 
-            class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-2 md:px-6 md:py-3 rounded-full shadow-lg transition-colors flex items-center gap-1 md:gap-2 text-sm md:text-base"
+            class="bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-3 rounded-full shadow-lg transition-colors flex items-center gap-2"
             on:click={() => currentPage = 2}
             disabled={currentPage === 2}
             class:opacity-50={currentPage === 2}
           >
-            <span class="hidden sm:inline">Teachers</span>
-            <span class="sm:hidden">Teach</span>
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            Teachers
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
             </svg>
           </button>
@@ -1085,19 +900,19 @@
     
     <!-- Faculty Edit Modal -->
     {#if showEditModal}
-      <div class="fixed inset-0 bg-white/20 backdrop-blur-sm flex items-center justify-center p-3 md:p-4 pt-16 md:pt-20 z-50" 
+      <div class="fixed inset-0 bg-white/20 backdrop-blur-sm flex items-center justify-center p-4 pt-20 z-50" 
            role="dialog" 
            aria-modal="true"
            tabindex="-1"
            on:click={(e) => { if (e.target === e.currentTarget) closeEditModal(); }}
            on:keydown={(e) => e.key === 'Escape' && closeEditModal()}
            transition:fade={{ duration: 200 }}>
-        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[85vh] md:max-h-[80vh] overflow-y-auto faculty-edit-modal" 
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[80vh] overflow-y-auto faculty-edit-modal" 
              role="document"
              transition:fly={{ y: 50, duration: 300 }}>
-          <div class="bg-gradient-to-r from-green-600 to-green-700 text-white p-4 md:p-6 rounded-tl-2xl">
+          <div class="bg-gradient-to-r from-green-600 to-green-700 text-white p-6 rounded-tl-2xl">
             <div class="flex justify-between items-center">
-              <h3 class="text-lg md:text-xl font-bold">
+              <h3 class="text-xl font-bold">
                 {isCreatingNew ? 'Add New Faculty' : 'Edit Faculty'}
               </h3>
               <button 
@@ -1111,7 +926,7 @@
             </div>
           </div>
           
-          <form on:submit|preventDefault={saveFaculty} class="p-4 md:p-6 space-y-3 md:space-y-4">
+          <form on:submit|preventDefault={saveFaculty} class="p-6 space-y-4">
             <div>
               <label for="faculty-name" class="block text-sm font-medium text-gray-700 mb-2">Name</label>
               <input
@@ -1119,7 +934,7 @@
                 type="text"
                 bind:value={editForm.name}
                 required
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm md:text-base"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                 placeholder="Enter faculty name"
               />
             </div>
@@ -1130,7 +945,7 @@
                 id="faculty-role"
                 bind:value={editForm.role}
                 required
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm md:text-base"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
               >
                 <option value="">Select Role</option>
                 <option value="Principal">Principal</option>
@@ -1152,7 +967,7 @@
                 id="faculty-department"
                 bind:value={editForm.department}
                 required
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm md:text-base"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
               >
                 <option value="">Select Department</option>
                 <option value="Administration">Administration</option>
@@ -1173,7 +988,7 @@
                 id="faculty-email"
                 type="email"
                 bind:value={editForm.email}
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm md:text-base"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                 placeholder="Enter email address"
               />
             </div>
@@ -1184,7 +999,7 @@
                 id="faculty-number"
                 type="tel"
                 bind:value={editForm.number}
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 text-sm md:text-base"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                 placeholder="Enter phone number"
               />
             </div>
@@ -1197,9 +1012,9 @@
                 {#if editForm.image_url}
                   <div class="flex items-center gap-3">
                     <img 
-                      src={editForm.image_url} 
+                      src={imageBaseUrl + editForm.image_url}
                       alt="Current profile" 
-                      class="w-12 h-12 md:w-16 md:h-16 rounded-full object-cover border-2 border-gray-200"
+                      class="w-16 h-16 rounded-full object-cover border-2 border-gray-200"
                     />
                     <div class="flex-1">
                       <p class="text-sm text-gray-600">Current profile image</p>
@@ -1221,7 +1036,7 @@
                     type="file"
                     accept="image/*"
                     on:change={handleImageUpload}
-                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:bg-green-50 file:text-green-700 hover:file:bg-green-100 text-sm"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
                   />
                   <p class="text-xs text-gray-500 mt-1">Upload a profile image (JPG, PNG, GIF - Max 5MB)</p>
                 </div>
@@ -1238,18 +1053,18 @@
               </div>
             </div>
             
-            <div class="flex gap-2 md:gap-3 pt-4">
+            <div class="flex gap-3 pt-4">
               <button
                 type="button"
                 on:click={closeEditModal}
-                class="flex-1 bg-gray-100 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-200 transition-colors text-sm md:text-base"
+                class="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isUpdating}
-                class="flex-1 bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm md:text-base"
+                class="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {#if isUpdating}
                   <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

@@ -4,11 +4,29 @@ import { faculty } from '$lib/server/db/schema.js';
 import { eq } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 
+// GET faculty by id
+export const GET: RequestHandler = async ({ params }) => {
+  try {
+    const id = parseInt(params.id);
+    const database = await db();
+    const singleFaculty = await database.select().from(faculty).where(eq(faculty.id, id));
+
+    if (singleFaculty.length === 0) {
+      return json({ error: 'Faculty not found' }, { status: 404 });
+    }
+
+    return json(singleFaculty[0]);
+  } catch (error) {
+    console.error('Error fetching faculty:', error);
+    return json({ error: 'Failed to fetch faculty' }, { status: 500 });
+  }
+};
+
 // PUT update faculty
 export const PUT: RequestHandler = async ({ params, request }) => {
   try {
     const id = parseInt(params.id);
-    const { name, role, department, email, number } = await request.json();
+    const { name, role, department, email, number, image_url } = await request.json();
     
     if (!name || !role || !department) {
       return json({ error: 'Name, role, and department are required' }, { status: 400 });
@@ -21,7 +39,8 @@ export const PUT: RequestHandler = async ({ params, request }) => {
         role, 
         department,
         email: email || null,
-        number: number || null
+        number: number || null,
+        image_url: image_url || null
       })
       .where(eq(faculty.id, id));
     

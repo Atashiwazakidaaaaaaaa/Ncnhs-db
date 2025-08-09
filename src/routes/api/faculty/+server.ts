@@ -19,7 +19,7 @@ export const GET: RequestHandler = async () => {
 // POST new faculty
 export const POST: RequestHandler = async ({ request }) => {
   try {
-    const { name, role, department, email, number } = await request.json();
+    const { name, role, department, email, number, image_url } = await request.json();
     
     if (!name || !role || !department) {
       return json({ error: 'Name, role, and department are required' }, { status: 400 });
@@ -31,7 +31,8 @@ export const POST: RequestHandler = async ({ request }) => {
       role,
       department,
       email: email || null,
-      number: number || null
+      number: number || null,
+      image_url: image_url || null
     });
     
     // Get the most recently inserted faculty

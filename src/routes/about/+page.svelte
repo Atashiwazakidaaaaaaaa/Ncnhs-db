@@ -52,7 +52,9 @@
             <textarea bind:value={updatedContent} rows="4" class="form-control"></textarea>
             <button on:click={saveEdit} class="btn btn-success mt-2">Save</button>
           {:else}
-            <button on:click={() => startEdit('vision', getContent('vision'))} class="btn btn-primary mt-2">Edit</button>
+            {#if isAdmin}
+              <button on:click={() => startEdit('vision', getContent('vision'))} class="btn btn-primary mt-2">Edit</button>
+            {/if}
           {/if}
         </div>  
       </div>
@@ -65,7 +67,9 @@
             <textarea bind:value={updatedContent} rows="5" class="form-control"></textarea>
             <button on:click={saveEdit} class="btn btn-success mt-2">Save</button>
           {:else}
-            <button on:click={() => startEdit('mission', getContent('mission'))} class="btn btn-primary mt-2">Edit</button>
+            {#if isAdmin}
+              <button on:click={() => startEdit('mission', getContent('mission'))} class="btn btn-primary mt-2">Edit</button>
+            {/if}
           {/if}
         </div>
       </div>
@@ -78,7 +82,9 @@
             <textarea bind:value={updatedContent} rows ="6" class="form-control"></textarea>
             <button on:click= {saveEdit} class ="btn btn-success mt-2">Save</button>
           {:else} 
-            <button on:click ={()=> startEdit ('core_values', getContent ('core_values'))} class ="btn btn-primary mt-2"> Edit </button> 
+            {#if isAdmin}
+              <button on:click={() => startEdit('core_values', getContent('core_values'))} class="btn btn-primary mt-2">Edit</button>
+            {/if}
           {/if}
         </div> 
       </div>
@@ -90,7 +96,9 @@
         <textarea bind:value={updatedContent} rows="8" class="form-control"></textarea>
         <button on:click={saveEdit} class="btn btn-success mt-2">Save</button>
       {:else}
-        <button on:click={() => startEdit('ncnhs_about', getContent('ncnhs_about'))} class="btn btn-primary mt-2">Edit</button>
+        {#if isAdmin}
+          <button on:click={() => startEdit('ncnhs_about', getContent('ncnhs_about'))} class="btn btn-primary mt-2">Edit</button>
+        {/if}
       {/if}
     </div>
   </div>

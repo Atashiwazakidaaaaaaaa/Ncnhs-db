@@ -437,13 +437,14 @@
   .btn-header {
     background-color: #65D269;
     font-weight: bold;
-    border-radius: 12px;
-    padding: 6px 16px;
+    border-radius: 10px;
+    padding: 20px 40px;
     margin: 10px 5px;
     margin-left: 16px;
     display: block;
     transition: background-color 0.5s ease;
     color: #000;
+    font-size: 1.1rem;
     text-decoration: none;
   }
 
